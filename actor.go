@@ -2,9 +2,9 @@ package pubsub
 
 type Actor struct {
 	// actor id.
-	id string
-	// topic to which the actor is subscribed.
-	topic *Topic
+	Id string
+	// Topic to which the actor is subscribed.
+	Topic *Topic
 	// Recieve channel will recieve the events from the topic to which
 	// the actor is subscribed.
 	Recieve chan []byte
@@ -12,8 +12,8 @@ type Actor struct {
 
 func NewActor(id string, t *Topic) *Actor {
 	return &Actor{
-		id:      id,
-		topic:   t,
+		Id:      id,
+		Topic:   t,
 		Recieve: make(chan []byte, 192),
 	}
 }
