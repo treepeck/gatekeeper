@@ -56,6 +56,11 @@ func (t *Topic) RouteEvents() {
 // register registers a new subscriber.
 func (t *Topic) register(a *Actor) {
 	t.subs[a] = struct{}{}
+
+	if data, err := t.handlers[ADD_SUB](Event{Pub: a}); err == nil {
+		t.publish(data)
+	}
+
 	log.Printf("actor \"%s\" registered in topic \"%s\"", a.Id, t.Id)
 }
 
@@ -63,6 +68,11 @@ func (t *Topic) register(a *Actor) {
 func (t *Topic) unregister(a *Actor) {
 	if _, exists := t.subs[a]; exists {
 		t.subs[a] = struct{}{}
+
+		if data, err := t.handlers[REMOVE_SUB](Event{Pub: a}); err == nil {
+			t.publish(data)
+		}
+
 		log.Printf("actor \"%s\" ubregistered from topic \"%s\"", a.Id, t.Id)
 	}
 }
