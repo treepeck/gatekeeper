@@ -8,4 +8,9 @@ type Event struct {
 
 type Action int
 
+const (
+	ADD_SUB Action = iota
+	REMOVE_SUB
+)
+
 type Handler func(Event) ([]byte, error)
