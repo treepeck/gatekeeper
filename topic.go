@@ -1,29 +1,46 @@
 package pubsub
 
-import "log"
-
-type topic struct {
-	subs map[string]*Actor
+type Topic struct {
+	// Topic id.
+	id string
+	// Subscribed actors.
+	subs map[*Actor]struct{}
+	// handlers will handle the incomming events.
+	handlers map[Action]Handler
+	// Recieve channel will recieve the events from the subscribed actors.
+	Recieve chan Event
+	// Close will stop the RouteEvents routine.
+	Destroy chan bool
 }
 
-func newTopic() *topic {
-	return &topic{
-		subs: make(map[string]*Actor, 0),
+func NewTopic(id string, handlers map[Action]Handler) *Topic {
+	return &Topic{
+		id:       id,
+		subs:     make(map[*Actor]struct{}),
+		handlers: make(map[Action]Handler),
+		Recieve:  make(chan Event),
+		Destroy:  make(chan bool),
 	}
 }
 
-func (t *topic) subscribe(a *Actor) {
-	log.Printf("actor \"%s\" subscribed to topic \"%s\"", a.id, a.topId)
-	t.subs[a.id] = a
+func (t *Topic) RouteEvents() {
+	for {
+		select {
+		case e := <-t.Recieve:
+			if h, exists := t.handlers[e.Action]; exists {
+				if data, err := h(e); err == nil {
+					t.publish(data)
+				}
+			}
+
+		case <-t.Destroy:
+			return
+		}
+	}
 }
 
-func (t *topic) unsubscribe(a *Actor) {
-	log.Printf("actor \"%s\" ubsubscribed from topic \"%s\"", a.id, a.topId)
-	delete(t.subs, a.id)
-}
-
-func (t *topic) publish(e Event) {
-	for _, a := range t.subs {
-		a.Recieve <- e.Data
+func (t *Topic) publish(data []byte) {
+	for a := range t.subs {
+		a.Recieve <- data
 	}
 }
