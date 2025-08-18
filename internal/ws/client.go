@@ -1,4 +1,4 @@
-package main
+package ws
 
 import (
 	"time"
@@ -19,24 +19,24 @@ const (
 )
 
 type client struct {
-	id      string
-	topicId string
-	hub     *Hub
-	send    chan event
-	conn    *websocket.Conn
-	isAlive bool
+	id         string
+	roomId     string
+	gatekeeper *Gatekeeper
+	send       chan ServerEvent
+	conn       *websocket.Conn
+	isAlive    bool
 }
 
-func newClient(id, topicId string, h *Hub, conn *websocket.Conn) *client {
+func newClient(id string, g *Gatekeeper, conn *websocket.Conn) *client {
 	c := &client{
-		id:      id,
-		topicId: topicId,
-		hub:     h,
-		send:    make(chan event),
-		conn:    conn,
-		isAlive: true,
+		id:         id,
+		gatekeeper: g,
+		send:       make(chan ServerEvent),
+		conn:       conn,
+		isAlive:    true,
 	}
 
+	// Set connection parameters.
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetPongHandler(c.pongHandler)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -48,16 +48,25 @@ func newClient(id, topicId string, h *Hub, conn *websocket.Conn) *client {
 }
 
 func (c *client) read() {
-	defer c.cleanup()
+	defer func() {
+		c.cleanup()
+	}()
 
 	for {
-		var e event
+		var e ClientEvent
 		err := c.conn.ReadJSON(&e)
 		if err != nil {
 			return
 		}
 
-		c.hub.route <- e
+		// Forbit the client to create rooms when it is already in the game.
+		// if e.Act == create_topic || c.topicId != "hub" {
+		// 	continue
+		// }
+		e.RoomId = c.roomId
+		e.ClientId = c.id
+
+		c.gatekeeper.bus <- e
 	}
 }
 
@@ -100,6 +109,7 @@ func (c *client) cleanup() {
 	if c.isAlive {
 		c.isAlive = false
 		c.conn.Close()
-		c.hub.unregister <- c
+		c.gatekeeper.unregister <- c
+		close(c.send)
 	}
 }
