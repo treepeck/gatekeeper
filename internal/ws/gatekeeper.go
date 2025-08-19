@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"log"
 
+	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/BelikovArtem/gatekeeper/pkg/mq"
 	"github.com/gorilla/websocket"
 )
@@ -16,7 +17,7 @@ type Gatekeeper struct {
 	clientsCounter int
 	dialer         mq.Dialer
 	unregister     chan *client
-	bus            chan ClientEvent
+	bus            chan event.ClientEvent
 	Register       chan *websocket.Conn
 	rooms          map[string]*room
 }
@@ -33,7 +34,7 @@ func NewGatekeeper(d mq.Dialer) *Gatekeeper {
 	g := &Gatekeeper{
 		dialer:     d,
 		unregister: make(chan *client),
-		bus:        make(chan ClientEvent),
+		bus:        make(chan event.ClientEvent),
 		Register:   make(chan *websocket.Conn),
 		rooms:      rooms,
 	}
@@ -72,9 +73,9 @@ func (g *Gatekeeper) handleRegister(conn *websocket.Conn) {
 	c := newClient(rand.Text(), g, conn)
 	g.rooms["hub"].subscribe(c)
 
-	g.rooms["hub"].broadcast(ServerEvent{
-		Act:     CLIENTS_COUNTER,
-		Payload: encodeOrPanic(g.clientsCounter),
+	g.rooms["hub"].broadcast(event.ServerEvent{
+		Act:     event.CLIENTS_COUNTER,
+		Payload: event.EncodeOrPanic(g.clientsCounter),
 	})
 }
 
@@ -94,9 +95,9 @@ func (g *Gatekeeper) handleUnregister(c *client) {
 
 	r.unsubscribe(c)
 
-	g.rooms["hub"].broadcast(ServerEvent{
-		Act:     CLIENTS_COUNTER,
-		Payload: encodeOrPanic(g.clientsCounter),
+	g.rooms["hub"].broadcast(event.ServerEvent{
+		Act:     event.CLIENTS_COUNTER,
+		Payload: event.EncodeOrPanic(g.clientsCounter),
 	})
 }
 
@@ -104,7 +105,7 @@ func (g *Gatekeeper) handleUnregister(c *client) {
 route forwards events to the room if the room exists and the publisher is
 subscribed to that room.
 */
-func (g *Gatekeeper) route(e ClientEvent) {
+func (g *Gatekeeper) route(e event.ClientEvent) {
 	r, exists := g.rooms[e.RoomId]
 	if !exists {
 		log.Printf("client \"%s\" sends a message to \"%s\" which doesn't exist",

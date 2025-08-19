@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/BelikovArtem/gatekeeper/pkg/mq"
 	"github.com/rabbitmq/amqp091-go"
 )
@@ -68,7 +69,7 @@ func (r *room) unsubscribe(c *client) {
 /*
 publish publishes events to the room 'out' queue.
 */
-func (r *room) publish(e ClientEvent) {
+func (r *room) publish(e event.ClientEvent) {
 	body, err := json.Marshal(e)
 	if err != nil {
 		log.Panicf("cannot marshal a body")
@@ -107,7 +108,7 @@ func (r *room) consume() {
 
 	go func() {
 		for d := range events {
-			var e ServerEvent
+			var e event.ServerEvent
 			err := json.Unmarshal(d.Body, &e)
 			if err != nil {
 				log.Panicf("cannot unmarshal queue event: %s", err)
@@ -122,7 +123,7 @@ func (r *room) consume() {
 /*
 broadcast broadcasts the event among all subscribed clients.
 */
-func (r *room) broadcast(e ServerEvent) {
+func (r *room) broadcast(e event.ServerEvent) {
 	for _, c := range r.subs {
 		c.send <- e
 	}

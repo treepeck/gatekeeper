@@ -56,7 +56,7 @@ func OpenChannel(conn *amqp091.Connection) (*amqp091.Channel, error) {
 }
 
 /*
-DeclareTopology declares an topic exchange and two queues.
+DeclareTopology declares the "HUB" topic exchange.
 
 Call this function ONLY on the core server as close to the program start as
 possible.
@@ -68,6 +68,16 @@ func DeclareExchange(ch *amqp091.Channel) error {
 		return err
 	}
 	return err
+}
+
+/*
+DeleteExchange deletes the "HUB" topic exchange.
+
+Call this function on the core server exit to cleanup the created exchange and
+free resources.
+*/
+func DeleteExchange(ch *amqp091.Channel) error {
+	return ch.ExchangeDelete("hub", false, false)
 }
 
 /*
