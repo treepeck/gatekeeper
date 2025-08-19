@@ -1,4 +1,4 @@
-package ws
+package event
 
 import (
 	"encoding/json"
@@ -35,7 +35,7 @@ const (
 	CREATE_ROOM
 )
 
-func encodeOrPanic(v any) []byte {
+func EncodeOrPanic(v any) []byte {
 	p, err := json.Marshal(v)
 	if err != nil {
 		log.Panicf("cannot encode ServerEvent payload: %s", err)

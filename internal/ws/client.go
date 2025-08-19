@@ -3,6 +3,7 @@ package ws
 import (
 	"time"
 
+	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/gorilla/websocket"
 )
 
@@ -29,7 +30,7 @@ type client struct {
 	gatekeeper *Gatekeeper
 	// send must be buffered, otherwise if the goroutine writes to it but the
 	// client drops the connection, the goroutine will wait forever.
-	send chan ServerEvent
+	send chan event.ServerEvent
 	conn *websocket.Conn
 	// is WebSocket connection alive.
 	isAlive bool
@@ -39,7 +40,7 @@ func newClient(id string, g *Gatekeeper, conn *websocket.Conn) *client {
 	c := &client{
 		id:         id,
 		gatekeeper: g,
-		send:       make(chan ServerEvent, 192),
+		send:       make(chan event.ServerEvent, 192),
 		conn:       conn,
 		isAlive:    true,
 	}
@@ -64,7 +65,7 @@ func (c *client) read() {
 		c.cleanup()
 	}()
 
-	var e ClientEvent
+	var e event.ClientEvent
 	for {
 		err := c.conn.ReadJSON(&e)
 		if err != nil {
