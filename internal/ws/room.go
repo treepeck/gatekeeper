@@ -3,7 +3,6 @@ package ws
 import (
 	"log"
 
-	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/BelikovArtem/gatekeeper/pkg/mq"
 	"github.com/rabbitmq/amqp091-go"
 )
@@ -66,9 +65,9 @@ func (r *room) unsubscribe(c *client) {
 /*
 broadcast broadcasts the event among all subscribed clients.
 */
-func (r *room) broadcast(e event.ServerEvent) {
+func (r *room) broadcast(raw []byte) {
 	for _, c := range r.subs {
-		c.send <- e
+		c.send <- raw
 	}
 }
 

@@ -74,10 +74,11 @@ func (g *Gatekeeper) handleRegister(conn *websocket.Conn) {
 	c := newClient(rand.Text(), g, conn)
 	g.rooms["hub"].subscribe(c)
 
-	g.rooms["hub"].broadcast(event.ServerEvent{
+	raw := event.EncodeOrPanic(event.ServerEvent{
 		Act:     event.CLIENTS_COUNTER,
 		Payload: event.EncodeOrPanic(g.clientsCounter),
 	})
+	g.rooms["hub"].broadcast(raw)
 }
 
 /*
@@ -96,10 +97,11 @@ func (g *Gatekeeper) handleUnregister(c *client) {
 
 	r.unsubscribe(c)
 
-	g.rooms["hub"].broadcast(event.ServerEvent{
+	raw := event.EncodeOrPanic(event.ServerEvent{
 		Act:     event.CLIENTS_COUNTER,
 		Payload: event.EncodeOrPanic(g.clientsCounter),
 	})
+	g.rooms["hub"].broadcast(raw)
 }
 
 /*

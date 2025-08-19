@@ -30,7 +30,7 @@ type client struct {
 	gatekeeper *Gatekeeper
 	// send must be buffered, otherwise if the goroutine writes to it but the
 	// client drops the connection, the goroutine will wait forever.
-	send chan event.ServerEvent
+	send chan []byte
 	conn *websocket.Conn
 	// is WebSocket connection alive.
 	isAlive bool
@@ -40,7 +40,7 @@ func newClient(id string, g *Gatekeeper, conn *websocket.Conn) *client {
 	c := &client{
 		id:         id,
 		gatekeeper: g,
-		send:       make(chan event.ServerEvent, 192),
+		send:       make(chan []byte, 192),
 		conn:       conn,
 		isAlive:    true,
 	}
@@ -92,13 +92,13 @@ func (c *client) write() {
 
 	for {
 		select {
-		case e, ok := <-c.send:
+		case raw, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			err := c.conn.WriteJSON(e)
+			err := c.conn.WriteMessage(websocket.BinaryMessage, raw)
 			if err != nil {
 				return
 			}

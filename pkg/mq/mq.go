@@ -6,12 +6,10 @@ package mq
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"os"
 	"time"
 
-	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/rabbitmq/amqp091-go"
 )
 
@@ -120,16 +118,14 @@ func DeclareAndBindQueues(ch *amqp091.Channel, name string) error {
 }
 
 /*
-ConsumeQueue consumes a queue with the specified name.  It wil wait for a new
-messages until the caller will send a signal on a stop channel.  It's a caller's
-resonsibility to stop the consuming process.  After consuming, the event will be
-forwarded into the callback function.
+ConsumeQueue consumes a queue with the specified name.  It will wait for new
+messages until the caller sends a signal on a stop channel.  It is the caller's
+responsibility to stop the consuming process.  After consuming, the event will
+be forwarded to the callback function.
 
 Panics if the queue cannot be consumed.
 */
-func Consume(ch *amqp091.Channel, name string, stop <-chan struct{},
-	callback func(event.ServerEvent)) {
-
+func Consume(ch *amqp091.Channel, name string, stop <-chan struct{}, callback func([]byte)) {
 	events, err := ch.Consume(name, "", false, true, false, false, nil)
 	if err != nil {
 		log.Panicf("cannot consume queue \"%s\": %s", name, err)
@@ -138,19 +134,22 @@ func Consume(ch *amqp091.Channel, name string, stop <-chan struct{},
 
 	go func() {
 		for d := range events {
-			var e event.ServerEvent
-			err := json.Unmarshal(d.Body, &e)
 			if err != nil {
 				log.Printf("cannot unmarshal queue event: %s", err)
 				return
 			}
-			callback(e)
+			callback(d.Body)
 		}
 	}()
 
 	<-stop
 }
 
+/*
+Publish publishes a message to the queue with the specified name via the
+specified channel.  It waits up to 5 seconds for the message to be published;
+otherwise, an error is logged.
+*/
 func Publish(ch *amqp091.Channel, name string, raw []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
