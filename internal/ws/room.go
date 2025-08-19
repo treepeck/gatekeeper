@@ -29,11 +29,7 @@ func newRoom(id string, ch *amqp091.Channel) *room {
 		stopConsuming: make(chan struct{}),
 	}
 
-	if r.id == "hub" {
-		mq.DeclareTopology(r.channel)
-	} else {
-		mq.DeclareAndBindQueues(r.channel, r.id)
-	}
+	mq.DeclareAndBindQueues(r.channel, r.id)
 
 	go r.consume()
 
@@ -84,7 +80,7 @@ func (r *room) publish(e ClientEvent) {
 	err = r.channel.PublishWithContext(
 		ctx,
 		"hub",
-		r.id+"out",
+		r.id+".out",
 		false,
 		false,
 		amqp091.Publishing{
@@ -103,9 +99,9 @@ stopConsuming channel.  Each recieves event is broadcasted among all subscribed
 clients.
 */
 func (r *room) consume() {
-	events, err := mq.ConsumeQueue(r.channel, r.id+"in")
+	events, err := mq.ConsumeQueue(r.channel, r.id+".in")
 	if err != nil {
-		log.Panicf("cannot consume queue \"%s\": %s", r.id+"in", err)
+		log.Panicf("cannot consume queue \"%s\": %s", r.id+".in", err)
 		return
 	}
 
@@ -137,13 +133,6 @@ destroy stops the [consume] goroutine and closes the room channel to prevent
 memory leaks.
 */
 func (r *room) destroy() {
-	if r.id == "hub" {
-		err := r.channel.ExchangeDelete(r.id, false, false)
-		if err != nil {
-			log.Printf("cannot delete a exchange: %s", err)
-		}
-	}
-
 	r.stopConsuming <- struct{}{}
 
 	for _, c := range r.subs {
