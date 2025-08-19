@@ -21,7 +21,7 @@ type Dialer struct {
 
 /*
 NewDialer connects to the RabbitMQ using a URL provided as an environment
-variable.  After establishing a connection, a new channel is opened.
+variable.
 */
 func NewDialer() Dialer {
 	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))

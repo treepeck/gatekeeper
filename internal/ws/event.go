@@ -10,6 +10,11 @@ type ServerEvent struct {
 	Act     Action          `json:"a"`
 }
 
+func (e ServerEvent) Encode() []byte {
+	p, _ := json.Marshal(e)
+	return p
+}
+
 type ClientEvent struct {
 	Payload  json.RawMessage `json:"p"`
 	ClientId string          `json:"cid"`
@@ -20,13 +25,13 @@ type ClientEvent struct {
 type Action int
 
 const (
-	// Server events.
+	// Server messages.
 	CLIENTS_COUNTER Action = iota
 	ADD_ROOM
 	REMOVE_ROOM
 	UPDATE_ROOM
 
-	// Client events.
+	// Client messages.
 	CREATE_ROOM
 )
 

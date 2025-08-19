@@ -6,10 +6,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/BelikovArtem/gatekeeper/internal/mq"
+	"github.com/BelikovArtem/gatekeeper/pkg/mq"
 	"github.com/rabbitmq/amqp091-go"
 )
 
+/*
+room forwards incomming events into the "out" queue and broadcasts events recieved
+from the "in" queue back to the subscribed clients.
+*/
 type room struct {
 	id            string
 	channel       *amqp091.Channel
@@ -36,6 +40,9 @@ func newRoom(id string, ch *amqp091.Channel) *room {
 	return r
 }
 
+/*
+subscribe subscribes the specified client to the room.
+*/
 func (r *room) subscribe(c *client) {
 	if _, exists := r.subs[c.id]; exists {
 		log.Printf("client \"%s\" tries to subscribe multiple times", c.id)
@@ -49,6 +56,9 @@ func (r *room) subscribe(c *client) {
 	log.Printf("client \"%s\" subscribed to \"%s\"", c.id, r.id)
 }
 
+/*
+unsubscribe unsubscribed the specified client from the room.
+*/
 func (r *room) unsubscribe(c *client) {
 	if _, exists := r.subs[c.id]; !exists {
 		log.Printf("client \"%s\" tries to unsubscribe but isn't subscribed", c.id)
@@ -113,12 +123,19 @@ func (r *room) consume() {
 	<-r.stopConsuming
 }
 
+/*
+broadcast broadcasts the event among all subscribed clients.
+*/
 func (r *room) broadcast(e ServerEvent) {
 	for _, c := range r.subs {
 		c.send <- e
 	}
 }
 
+/*
+destroy stops the [consume] goroutine and closes the room channel to prevent
+memory leaks.
+*/
 func (r *room) destroy() {
 	if r.id == "hub" {
 		err := r.channel.ExchangeDelete(r.id, false, false)

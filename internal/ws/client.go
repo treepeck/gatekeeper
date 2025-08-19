@@ -18,20 +18,28 @@ const (
 	maxMessageSize = 1024
 )
 
+/*
+client wraps a single connection and provides methods for reading, writing and
+handling WebSocket messages.
+*/
 type client struct {
-	id         string
+	id string
+	// id of the room to which the client is subscribed.
 	roomId     string
 	gatekeeper *Gatekeeper
-	send       chan ServerEvent
-	conn       *websocket.Conn
-	isAlive    bool
+	// send must be buffered, otherwise if the goroutine writes to it but the
+	// client drops the connection, the goroutine will wait forever.
+	send chan ServerEvent
+	conn *websocket.Conn
+	// is WebSocket connection alive.
+	isAlive bool
 }
 
 func newClient(id string, g *Gatekeeper, conn *websocket.Conn) *client {
 	c := &client{
 		id:         id,
 		gatekeeper: g,
-		send:       make(chan ServerEvent),
+		send:       make(chan ServerEvent, 192),
 		conn:       conn,
 		isAlive:    true,
 	}
@@ -47,22 +55,22 @@ func newClient(id string, g *Gatekeeper, conn *websocket.Conn) *client {
 	return c
 }
 
+/*
+read consequentially (one at a time) reads messages from the connection and
+forwards them to the gatekeeper.
+*/
 func (c *client) read() {
 	defer func() {
 		c.cleanup()
 	}()
 
+	var e ClientEvent
 	for {
-		var e ClientEvent
 		err := c.conn.ReadJSON(&e)
 		if err != nil {
 			return
 		}
 
-		// Forbit the client to create rooms when it is already in the game.
-		// if e.Act == create_topic || c.topicId != "hub" {
-		// 	continue
-		// }
 		e.RoomId = c.roomId
 		e.ClientId = c.id
 
@@ -70,6 +78,10 @@ func (c *client) read() {
 	}
 }
 
+/*
+write consequentially (one at a time) writes messages to the connection.
+Automatically sends ping messages to maintain a hearbeat.
+*/
 func (c *client) write() {
 	pingTicker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -79,13 +91,13 @@ func (c *client) write() {
 
 	for {
 		select {
-		case body, ok := <-c.send:
+		case e, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			err := c.conn.WriteJSON(body)
+			err := c.conn.WriteJSON(e)
 			if err != nil {
 				return
 			}
@@ -101,10 +113,19 @@ func (c *client) write() {
 	}
 }
 
+/*
+pongHandler handles the incomming pong messages to maintain a heartbeat.
+
+Sending ping and pong messages is necessary because without it the connections
+are interrupted after about 2 minutes of no message sending from the client.
+*/
 func (c *client) pongHandler(appData string) error {
 	return c.conn.SetReadDeadline(time.Now().Add(pongWait))
 }
 
+/*
+cleanup closes the connection and unregisters the client from the gatekeeper.
+*/
 func (c *client) cleanup() {
 	if c.isAlive {
 		c.isAlive = false
