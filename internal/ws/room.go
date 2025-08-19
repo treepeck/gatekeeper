@@ -1,10 +1,7 @@
 package ws
 
 import (
-	"context"
-	"encoding/json"
 	"log"
-	"time"
 
 	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/BelikovArtem/gatekeeper/pkg/mq"
@@ -32,7 +29,7 @@ func newRoom(id string, ch *amqp091.Channel) *room {
 
 	mq.DeclareAndBindQueues(r.channel, r.id)
 
-	go r.consume()
+	go mq.Consume(r.channel, r.id+".in", r.stopConsuming, r.broadcast)
 
 	return r
 }
@@ -64,60 +61,6 @@ func (r *room) unsubscribe(c *client) {
 	delete(r.subs, c.id)
 
 	log.Printf("client \"%s\" unsubscribed from \"%s\"", c.id, r.id)
-}
-
-/*
-publish publishes events to the room 'out' queue.
-*/
-func (r *room) publish(e event.ClientEvent) {
-	body, err := json.Marshal(e)
-	if err != nil {
-		log.Panicf("cannot marshal a body")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err = r.channel.PublishWithContext(
-		ctx,
-		"hub",
-		r.id+".out",
-		false,
-		false,
-		amqp091.Publishing{
-			Body:        body,
-			ContentType: "application/json",
-		},
-	)
-	if err != nil {
-		log.Panicf("cannot publish a message: %s", err)
-	}
-}
-
-/*
-consume consumes events from the room 'in' queue until recieves a singal from
-stopConsuming channel.  Each recieves event is broadcasted among all subscribed
-clients.
-*/
-func (r *room) consume() {
-	events, err := mq.ConsumeQueue(r.channel, r.id+".in")
-	if err != nil {
-		log.Panicf("cannot consume queue \"%s\": %s", r.id+".in", err)
-		return
-	}
-
-	go func() {
-		for d := range events {
-			var e event.ServerEvent
-			err := json.Unmarshal(d.Body, &e)
-			if err != nil {
-				log.Panicf("cannot unmarshal queue event: %s", err)
-			}
-			r.broadcast(e)
-		}
-	}()
-
-	<-r.stopConsuming
 }
 
 /*

@@ -5,9 +5,13 @@ new channels, exchanges, and queues.
 package mq
 
 import (
+	"context"
+	"encoding/json"
 	"log"
 	"os"
+	"time"
 
+	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/rabbitmq/amqp091-go"
 )
 
@@ -116,10 +120,55 @@ func DeclareAndBindQueues(ch *amqp091.Channel, name string) error {
 }
 
 /*
-ConsumeQueue consumes a queue with the specified name.
+ConsumeQueue consumes a queue with the specified name.  It wil wait for a new
+messages until the caller will send a signal on a stop channel.  It's a caller's
+resonsibility to stop the consuming process.  After consuming, the event will be
+forwarded into the callback function.
+
+Panics if the queue cannot be consumed.
 */
-func ConsumeQueue(ch *amqp091.Channel, name string) (<-chan amqp091.Delivery, error) {
-	return ch.Consume(name, "", false, true, false, false, nil)
+func Consume(ch *amqp091.Channel, name string, stop <-chan struct{},
+	callback func(event.ServerEvent)) {
+
+	events, err := ch.Consume(name, "", false, true, false, false, nil)
+	if err != nil {
+		log.Panicf("cannot consume queue \"%s\": %s", name, err)
+		return
+	}
+
+	go func() {
+		for d := range events {
+			var e event.ServerEvent
+			err := json.Unmarshal(d.Body, &e)
+			if err != nil {
+				log.Printf("cannot unmarshal queue event: %s", err)
+				return
+			}
+			callback(e)
+		}
+	}()
+
+	<-stop
+}
+
+func Publish(ch *amqp091.Channel, name string, raw []byte) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := ch.PublishWithContext(
+		ctx,
+		"hub",
+		name,
+		false,
+		false,
+		amqp091.Publishing{
+			Body:        raw,
+			ContentType: "application/json",
+		},
+	)
+	if err != nil {
+		log.Printf("cannot publish a message: %s", err)
+	}
 }
 
 /*

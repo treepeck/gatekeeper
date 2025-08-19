@@ -2,6 +2,7 @@ package ws
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"log"
 
 	"github.com/BelikovArtem/gatekeeper/pkg/event"
@@ -117,7 +118,12 @@ func (g *Gatekeeper) route(e event.ClientEvent) {
 		return
 	}
 
-	r.publish(e)
+	raw, err := json.Marshal(e)
+	if err != nil {
+		log.Printf("cannot marshal client event from \"%s\"", e.ClientId)
+		return
+	}
+	mq.Publish(r.channel, r.id+".out", raw)
 }
 
 /*
