@@ -57,17 +57,15 @@ func OpenChannel(conn *amqp091.Connection) (*amqp091.Channel, error) {
 
 /*
 DeclareTopology declares an topic exchange and two queues.
+
+Call this function ONLY on the core server as close to the program start as
+possible.
 */
-func DeclareTopology(ch *amqp091.Channel) error {
+func DeclareExchange(ch *amqp091.Channel) error {
 	err := ch.ExchangeDeclare("hub", "topic", false, true, false, false, nil)
 	if err != nil {
 		log.Printf("cannot declare an exchange: %s", err)
 		return err
-	}
-
-	err = DeclareAndBindQueues(ch, "hub")
-	if err != nil {
-		log.Printf("cannot declare and bind queues: %s", err)
 	}
 	return err
 }
