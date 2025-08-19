@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/BelikovArtem/gatekeeper/internal/env"
-	"github.com/BelikovArtem/gatekeeper/internal/mq"
 	"github.com/BelikovArtem/gatekeeper/internal/ws"
+	"github.com/BelikovArtem/gatekeeper/pkg/env"
+	"github.com/BelikovArtem/gatekeeper/pkg/mq"
 )
 
 func main() {
@@ -21,7 +21,9 @@ func main() {
 	g := ws.NewGatekeeper(d)
 	defer g.Destroy()
 
-	http.HandleFunc("GET /ws", g.HandleNewConnection)
+	http.HandleFunc("GET /ws", func(rw http.ResponseWriter, r *http.Request) {
+		ws.HandleHandshake(rw, r, g)
+	})
 
 	http.ListenAndServe(os.Getenv("ADDR"), nil)
 }

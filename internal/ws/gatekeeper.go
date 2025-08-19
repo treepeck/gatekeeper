@@ -3,20 +3,10 @@ package ws
 import (
 	"crypto/rand"
 	"log"
-	"net/http"
 
-	"github.com/BelikovArtem/gatekeeper/internal/mq"
+	"github.com/BelikovArtem/gatekeeper/pkg/mq"
 	"github.com/gorilla/websocket"
 )
-
-// upgrader is used to establish a WebSocket connection.
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
 
 /*
 Gatekeeper handles client connections, disconnections and routes incomming
@@ -53,15 +43,10 @@ func NewGatekeeper(d mq.Dialer) *Gatekeeper {
 	return g
 }
 
-func (g *Gatekeeper) HandleNewConnection(rw http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(rw, r, nil)
-	if err != nil {
-		return
-	}
-
-	g.Register <- conn
-}
-
+/*
+routeEvents consiquentially (one at a time) recieves incomming events from the
+gatekeeper channels and forwards them to the corresponding handlers.
+*/
 func (g *Gatekeeper) routeEvents() {
 	for {
 		select {
@@ -77,6 +62,10 @@ func (g *Gatekeeper) routeEvents() {
 	}
 }
 
+/*
+handleRegister registers a new client and broadcasts the clientCounter among
+all subscribed to the "hub" room clients.
+*/
 func (g *Gatekeeper) handleRegister(conn *websocket.Conn) {
 	g.clientsCounter++
 
@@ -89,6 +78,10 @@ func (g *Gatekeeper) handleRegister(conn *websocket.Conn) {
 	})
 }
 
+/*
+handleUnregister unregisters the client and broadcasts the clientCounter among
+all subscribed to the "hub" room clients.
+*/
 func (g *Gatekeeper) handleUnregister(c *client) {
 	g.clientsCounter--
 
@@ -107,10 +100,18 @@ func (g *Gatekeeper) handleUnregister(c *client) {
 	})
 }
 
+/*
+route forwards events to the room if the room exists and the publisher is
+subscribed to that room.
+*/
 func (g *Gatekeeper) route(e ClientEvent) {
 	r, exists := g.rooms[e.RoomId]
 	if !exists {
 		log.Printf("client \"%s\" sends a message to \"%s\" which doesn't exist",
+			e.ClientId, e.RoomId)
+		return
+	} else if _, exists := r.subs[e.ClientId]; !exists {
+		log.Printf("client \"%s\" sends a message to \"%s\" but isn't subscribed",
 			e.ClientId, e.RoomId)
 		return
 	}
@@ -118,6 +119,9 @@ func (g *Gatekeeper) route(e ClientEvent) {
 	r.publish(e)
 }
 
+/*
+Destroy destroys all rooms in a gatekeeper.
+*/
 func (g *Gatekeeper) Destroy() {
 	for _, r := range g.rooms {
 		r.destroy()
