@@ -3,7 +3,6 @@ package ws
 import (
 	"log"
 
-	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/BelikovArtem/gatekeeper/pkg/mq"
 	"github.com/rabbitmq/amqp091-go"
 )
@@ -49,13 +48,6 @@ func (r *room) subscribe(c *client) {
 	c.roomId = r.id
 
 	log.Printf("client \"%s\" subscribed to \"%s\"", c.id, r.id)
-
-	// Send redirect to a new subscriber.
-	raw := event.EncodeOrPanic(event.ServerEvent{
-		Action:  event.REDIRECT,
-		Payload: event.EncodeOrPanic(r.id),
-	})
-	c.send <- raw
 }
 
 /*
