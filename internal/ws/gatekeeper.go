@@ -75,7 +75,7 @@ func (g *Gatekeeper) handleRegister(conn *websocket.Conn) {
 	g.rooms["hub"].subscribe(c)
 
 	raw := event.EncodeOrPanic(event.ServerEvent{
-		Act:     event.CLIENTS_COUNTER,
+		Action:  event.CLIENTS_COUNTER,
 		Payload: event.EncodeOrPanic(g.clientsCounter),
 	})
 	g.rooms["hub"].broadcast(raw)
@@ -98,10 +98,28 @@ func (g *Gatekeeper) handleUnregister(c *client) {
 	r.unsubscribe(c)
 
 	raw := event.EncodeOrPanic(event.ServerEvent{
-		Act:     event.CLIENTS_COUNTER,
+		Action:  event.CLIENTS_COUNTER,
 		Payload: event.EncodeOrPanic(g.clientsCounter),
 	})
 	g.rooms["hub"].broadcast(raw)
+}
+
+/*
+handleCreateRoom creates a new room.  A single client cannot create or even be
+subscribed to multiple rooms simultaneously.
+*/
+func (g *Gatekeeper) handleCreateRoom(c *client) {
+	ch, err := g.dialer.OpenChannel()
+	if err != nil {
+		log.Printf("cannot open channel for a new room: %s", err)
+		return
+	}
+
+	id := rand.Text()
+	r := newRoom(id, ch)
+	r.subscribe(c)
+
+	g.rooms[id] = r
 }
 
 /*
@@ -120,9 +138,18 @@ func (g *Gatekeeper) route(e event.ClientEvent) {
 		return
 	}
 
+	switch e.Action {
+	case event.CREATE_ROOM:
+		c, exists := g.rooms["hub"].subs[e.ClientId]
+		if e.RoomId != "hub" || !exists {
+			return
+		}
+		g.handleCreateRoom(c)
+	}
+
 	raw, err := json.Marshal(e)
 	if err != nil {
-		log.Printf("cannot marshal client event from \"%s\"", e.ClientId)
+		log.Printf("cannot encode event from \"%s\"", e.ClientId)
 		return
 	}
 	mq.Publish(r.channel, r.id+".out", raw)

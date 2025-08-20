@@ -1,7 +1,3 @@
-/*
-Package mq manages connection with RabbitMQ and provides functions for spawning
-new channels, exchanges, and queues.
-*/
 package mq
 
 import (
@@ -23,7 +19,7 @@ type Dialer struct {
 
 /*
 NewDialer connects to the RabbitMQ using a URL provided as an environment
-variable.
+variable.  Panics if the connection cannot be established.
 */
 func NewDialer() Dialer {
 	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
@@ -40,17 +36,15 @@ func NewDialer() Dialer {
 OpenChannel opens a unique channel and puts it into a confirm mode, which allow
 waiting for ACK or NACK from the server.
 */
-func OpenChannel(conn *amqp091.Connection) (*amqp091.Channel, error) {
-	ch, err := conn.Channel()
+func (d Dialer) OpenChannel() (*amqp091.Channel, error) {
+	ch, err := d.Connection.Channel()
 	if err != nil {
-		log.Printf("cannot open a RabbitMQ channel: %s", err)
 		return nil, err
 	}
 
 	err = ch.Confirm(false)
 	if err != nil {
 		ch.Close()
-		log.Printf("cannot put channel into confirm mode: %s", err)
 		return nil, err
 	}
 
@@ -58,70 +52,40 @@ func OpenChannel(conn *amqp091.Connection) (*amqp091.Channel, error) {
 }
 
 /*
-DeclareTopology declares the "HUB" topic exchange.
-
-Call this function ONLY on the core server as close to the program start as
-possible.
-*/
-func DeclareExchange(ch *amqp091.Channel) error {
-	err := ch.ExchangeDeclare("hub", "topic", false, true, false, false, nil)
-	if err != nil {
-		log.Printf("cannot declare an exchange: %s", err)
-		return err
-	}
-	return err
-}
-
-/*
-DeleteExchange deletes the "HUB" topic exchange.
-
-Call this function on the core server exit to cleanup the created exchange and
-free resources.
-*/
-func DeleteExchange(ch *amqp091.Channel) error {
-	return ch.ExchangeDelete("hub", false, false)
-}
-
-/*
 DeclareAndBindQueues uses the provided channel to declare two queues, in and
-out.  Each queue name is prefixed with the exchange’s name.  After declaring the
-queues, they are bound to the gatekeeper exchange, which serves as the event bus
-for all messages in the system.
+out.  Each queue name is prefixed with the specified name.  After declaring the
+queues, they are bound to the "hub" exchange, which serves as the event bus for
+all events in the system.
 
-Each room must call this function to declare unique queues and use the roomId as
-a name.
+Gatekeeper should not call this function.  Each room is only a publisher and
+consumer to the queues, created by the core server.  That way it will be easier
+to manage the lifecycle of the queues.
 */
 func DeclareAndBindQueues(ch *amqp091.Channel, name string) error {
-	iQ, err := ch.QueueDeclare(name+".in", false, true, true, false, nil)
+	in, err := ch.QueueDeclare(name+".in", false, true, true, false, nil)
 	if err != nil {
-		log.Printf("cannot create in queue: %s", err)
 		return err
 	}
 
-	oQ, err := ch.QueueDeclare(name+".out", false, true, true, false, nil)
+	out, err := ch.QueueDeclare(name+".out", false, true, true, false, nil)
 	if err != nil {
-		log.Printf("cannot create out queue: %s", err)
 		return err
 	}
 
-	err = ch.QueueBind(iQ.Name, iQ.Name, "hub", false, nil)
+	err = ch.QueueBind(in.Name, in.Name, "hub", false, nil)
 	if err != nil {
-		log.Printf("cannot bind \"%s\" queue to exchange: %s", iQ.Name, err)
 		return err
 	}
 
-	err = ch.QueueBind(oQ.Name, oQ.Name, "hub", false, nil)
-	if err != nil {
-		log.Printf("cannot bind \"%s\" queue to exchange: %s", oQ.Name, err)
-	}
+	err = ch.QueueBind(out.Name, out.Name, "hub", false, nil)
 	return err
 }
 
 /*
-ConsumeQueue consumes a queue with the specified name.  It will wait for new
-messages until the caller sends a signal on a stop channel.  It is the caller's
-responsibility to stop the consuming process.  After consuming, the event will
-be forwarded to the callback function.
+Consume consumes events from the queue with the specified name.  It will wait
+for new events until the caller sends a signal on a stop channel.  It is the
+caller's responsibility to stop the consuming process.  After consuming, the
+event will be forwarded to the callback function.
 
 Panics if the queue cannot be consumed.
 */
@@ -146,8 +110,8 @@ func Consume(ch *amqp091.Channel, name string, stop <-chan struct{}, callback fu
 }
 
 /*
-Publish publishes a message to the queue with the specified name via the
-specified channel.  It waits up to 5 seconds for the message to be published;
+Publish publishes an event to the queue with the specified name via the
+specified channel.  It waits up to 5 seconds for the event to be published;
 otherwise, an error is logged.
 */
 func Publish(ch *amqp091.Channel, name string, raw []byte) {
@@ -168,11 +132,4 @@ func Publish(ch *amqp091.Channel, name string, raw []byte) {
 	if err != nil {
 		log.Printf("cannot publish a message: %s", err)
 	}
-}
-
-/*
-Release deletes the gatekeeper exchange and
-*/
-func (d Dialer) Release() {
-	d.Connection.Close()
 }

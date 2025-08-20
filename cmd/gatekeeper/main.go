@@ -16,7 +16,7 @@ func main() {
 	env.Load(".env")
 
 	d := mq.NewDialer()
-	defer d.Release()
+	defer d.Connection.Close()
 
 	g := ws.NewGatekeeper(d)
 	defer g.Destroy()
