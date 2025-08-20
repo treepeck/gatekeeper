@@ -69,7 +69,7 @@ func (g *Gatekeeper) routeEvents() {
 			g.handleUnregister(c)
 
 		case e := <-g.bus:
-			g.route(e)
+			g.publish(e)
 		}
 	}
 }
@@ -115,28 +115,38 @@ func (g *Gatekeeper) handleUnregister(c *client) {
 }
 
 /*
-handleCreateRoom creates a new room.  A single client cannot create or even be
+createRoom creates a new room.  A single client cannot create or even be
 subscribed to multiple rooms simultaneously.
 */
-func (g *Gatekeeper) handleCreateRoom(c *client) {
+func (g *Gatekeeper) createRoom(c *client, roomId string) {
 	ch, err := g.dialer.OpenChannel()
 	if err != nil {
 		log.Printf("cannot open channel for a new room: %s", err)
 		return
 	}
 
-	id := rand.Text()
-	r := newRoom(id, ch)
+	// Automatically unsubscribe the client from the hub.
+	g.rooms["hub"].unsubscribe(c)
+
+	r := newRoom(roomId, ch)
 	r.subscribe(c)
 
-	g.rooms[id] = r
+	g.rooms[roomId] = r
+
+	// Send redirect to the room creator.
+	raw := event.EncodeOrPanic(event.ServerEvent{
+		Action: event.REDIRECT,
+		// At this point roomId will change to the id of the created room.
+		Payload: event.EncodeOrPanic(c.roomId),
+	})
+	c.send <- raw
 }
 
 /*
-route forwards events to the room if the room exists and the publisher is
-subscribed to that room.
+publish publishes client event to the room's out queue if the room exists and the
+publisher is subscribed to that room.
 */
-func (g *Gatekeeper) route(e event.ClientEvent) {
+func (g *Gatekeeper) publish(e event.ClientEvent) {
 	r, exists := g.rooms[e.RoomId]
 	if !exists {
 		log.Printf("client \"%s\" sends a message to \"%s\" which doesn't exist",
@@ -150,18 +160,26 @@ func (g *Gatekeeper) route(e event.ClientEvent) {
 
 	switch e.Action {
 	case event.CREATE_ROOM:
+		// Check whether the client is allowed to create a new room.
 		c, exists := g.rooms["hub"].subs[e.ClientId]
 		if e.RoomId != "hub" || !exists {
 			return
 		}
-		g.handleCreateRoom(c)
-		// Send redirect to the room creator.
-		raw := event.EncodeOrPanic(event.ServerEvent{
-			Action: event.REDIRECT,
-			// At this point roomId will change to the id of the created room.
-			Payload: event.EncodeOrPanic(c.roomId),
-		})
-		c.send <- raw
+
+		id := rand.Text()
+
+		g.createRoom(c, id)
+
+		// Replace the client event to add a new room id.
+		e = event.ClientEvent{
+			Action: event.CREATE_ROOM,
+			Payload: event.EncodeOrPanic(event.CreateRoomPayload{
+				Id:     id,
+				Params: e.Payload,
+			}),
+			ClientId: e.ClientId,
+			RoomId:   e.RoomId,
+		}
 	}
 
 	raw, err := json.Marshal(e)

@@ -27,6 +27,11 @@ type ClientEvent struct {
 	Action EventAction `json:"a"`
 }
 
+type CreateRoomPayload struct {
+	Id     string          `json:"id"`
+	Params json.RawMessage `json:"params"`
+}
+
 /*
 EventAction is a domain of possible event types.  Core server can declare custom
 event types.  By default Gatekeeper will recognize only actions, defined in the

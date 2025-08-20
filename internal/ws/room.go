@@ -52,6 +52,7 @@ func (r *room) subscribe(c *client) {
 
 /*
 unsubscribe unsubscribed the specified client from the room.
+TODO: delete the room (except hub) if all clients are unsubscribed.
 */
 func (r *room) unsubscribe(c *client) {
 	if _, exists := r.subs[c.id]; !exists {
