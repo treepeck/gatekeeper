@@ -145,6 +145,13 @@ func (g *Gatekeeper) route(e event.ClientEvent) {
 			return
 		}
 		g.handleCreateRoom(c)
+		// Send redirect to the room creator.
+		raw := event.EncodeOrPanic(event.ServerEvent{
+			Action: event.REDIRECT,
+			// At this point roomId will change to the id of the created room.
+			Payload: event.EncodeOrPanic(c.roomId),
+		})
+		c.send <- raw
 	}
 
 	raw, err := json.Marshal(e)
