@@ -3,6 +3,7 @@ package ws
 import (
 	"log"
 
+	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/BelikovArtem/gatekeeper/pkg/mq"
 	"github.com/rabbitmq/amqp091-go"
 )
@@ -34,7 +35,8 @@ func newRoom(id string, ch *amqp091.Channel) *room {
 }
 
 /*
-subscribe subscribes the specified client to the room.
+subscribe subscribes the specified client to the room.  Each subscribed client
+will recieve a redirect event with the room id.
 */
 func (r *room) subscribe(c *client) {
 	if _, exists := r.subs[c.id]; exists {
@@ -47,6 +49,13 @@ func (r *room) subscribe(c *client) {
 	c.roomId = r.id
 
 	log.Printf("client \"%s\" subscribed to \"%s\"", c.id, r.id)
+
+	// Send redirect to a new subscriber.
+	raw := event.EncodeOrPanic(event.ServerEvent{
+		Action:  event.REDIRECT,
+		Payload: event.EncodeOrPanic(r.id),
+	})
+	c.send <- raw
 }
 
 /*
