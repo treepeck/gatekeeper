@@ -62,12 +62,12 @@ consumer to the queues, created by the core server.  That way it will be easier
 to manage the lifecycle of the queues.
 */
 func DeclareAndBindQueues(ch *amqp091.Channel, name string) error {
-	in, err := ch.QueueDeclare(name+".in", false, true, true, false, nil)
+	in, err := ch.QueueDeclare(name+".in", false, true, false, false, nil)
 	if err != nil {
 		return err
 	}
 
-	out, err := ch.QueueDeclare(name+".out", false, true, true, false, nil)
+	out, err := ch.QueueDeclare(name+".out", false, true, false, false, nil)
 	if err != nil {
 		return err
 	}
