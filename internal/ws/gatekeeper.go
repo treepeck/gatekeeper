@@ -23,10 +23,20 @@ type Gatekeeper struct {
 	rooms          map[string]*room
 }
 
+/*
+NewCore opens an AMQP channel, declares the exchange and creates a new Gatekeeper
+instance.  The created channel will be taken by the HUB room after the exchange
+declaration.
+*/
 func NewGatekeeper(d mq.Dialer) *Gatekeeper {
 	ch, err := d.Connection.Channel()
 	if err != nil {
-		log.Panicf("cannot declare a hub channel")
+		log.Fatalf("cannot declare a Gatekeeper channel")
+	}
+	err = ch.ExchangeDeclare("hub", "topic", false, true, false, false, nil)
+	if err != nil {
+		ch.Close()
+		log.Fatalf("cannot declare an exchange: %s", err)
 	}
 
 	rooms := make(map[string]*room, 1)
