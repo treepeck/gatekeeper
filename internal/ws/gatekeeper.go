@@ -20,37 +20,28 @@ type Gatekeeper struct {
 	unregister     chan *client
 	bus            chan event.ClientEvent
 	Register       chan *websocket.Conn
-	rooms          map[string]*room
+	subs           map[string]map[*client]struct{}
 }
 
 /*
 NewCore opens an AMQP channel, declares the exchange and creates a new Gatekeeper
-instance.  The created channel will be taken by the HUB room after the exchange
-declaration.
+instance.
 */
 func NewGatekeeper(d mq.Dialer) *Gatekeeper {
-	ch, err := d.Connection.Channel()
-	if err != nil {
-		log.Fatalf("cannot declare a Gatekeeper channel")
-	}
-	err = ch.ExchangeDeclare("hub", "topic", false, true, false, false, nil)
-	if err != nil {
-		ch.Close()
-		log.Fatalf("cannot declare an exchange: %s", err)
-	}
-
-	rooms := make(map[string]*room, 1)
-	rooms["hub"] = newRoom("hub", ch)
+	subs := make(map[string]map[*client]struct{}, 1)
+	subs["hub"] = make(map[*client]struct{}, 0)
 
 	g := &Gatekeeper{
 		dialer:     d,
 		unregister: make(chan *client),
 		bus:        make(chan event.ClientEvent),
 		Register:   make(chan *websocket.Conn),
-		rooms:      rooms,
+		subs:       subs,
 	}
 
 	go g.routeEvents()
+
+	go d.Consume("core", g.consume)
 
 	return g
 }
@@ -82,13 +73,16 @@ func (g *Gatekeeper) handleRegister(conn *websocket.Conn) {
 	g.clientsCounter++
 
 	c := newClient(rand.Text(), g, conn)
-	g.rooms["hub"].subscribe(c)
+
+	c.roomId = "hub"
+
+	g.subs["hub"][c] = struct{}{}
 
 	raw := event.EncodeOrPanic(event.ServerEvent{
 		Action:  event.CLIENTS_COUNTER,
 		Payload: event.EncodeOrPanic(g.clientsCounter),
 	})
-	g.rooms["hub"].broadcast(raw)
+	g.notify("hub", raw)
 }
 
 /*
@@ -98,48 +92,19 @@ all subscribed to the "hub" room clients.
 func (g *Gatekeeper) handleUnregister(c *client) {
 	g.clientsCounter--
 
-	r, exists := g.rooms[c.roomId]
-	if !exists {
+	if _, exists := g.subs[c.roomId]; !exists {
 		log.Printf("client \"%s\" is subscribed to \"%s\" which doesn't exist",
 			c.id, c.roomId)
 		return
 	}
 
-	r.unsubscribe(c)
+	delete(g.subs[c.roomId], c)
 
 	raw := event.EncodeOrPanic(event.ServerEvent{
 		Action:  event.CLIENTS_COUNTER,
 		Payload: event.EncodeOrPanic(g.clientsCounter),
 	})
-	g.rooms["hub"].broadcast(raw)
-}
-
-/*
-createRoom creates a new room.  A single client cannot create or even be
-subscribed to multiple rooms simultaneously.
-*/
-func (g *Gatekeeper) createRoom(c *client, roomId string) {
-	ch, err := g.dialer.OpenChannel()
-	if err != nil {
-		log.Printf("cannot open channel for a new room: %s", err)
-		return
-	}
-
-	// Automatically unsubscribe the client from the hub.
-	g.rooms["hub"].unsubscribe(c)
-
-	r := newRoom(roomId, ch)
-	r.subscribe(c)
-
-	g.rooms[roomId] = r
-
-	// Send redirect to the room creator.
-	raw := event.EncodeOrPanic(event.ServerEvent{
-		Action: event.REDIRECT,
-		// At this point roomId will change to the id of the created room.
-		Payload: event.EncodeOrPanic(c.roomId),
-	})
-	c.send <- raw
+	g.notify("hub", raw)
 }
 
 /*
@@ -147,39 +112,11 @@ publish publishes client event to the room's out queue if the room exists and th
 publisher is subscribed to that room.
 */
 func (g *Gatekeeper) publish(e event.ClientEvent) {
-	r, exists := g.rooms[e.RoomId]
-	if !exists {
-		log.Printf("client \"%s\" sends a message to \"%s\" which doesn't exist",
+	if _, exists := g.subs[e.RoomId]; !exists {
+		log.Printf("client \"%s\" tries to publish to \"%s\" which doesn't exist",
 			e.ClientId, e.RoomId)
+		// TODO: disconnect the client.
 		return
-	} else if _, exists := r.subs[e.ClientId]; !exists {
-		log.Printf("client \"%s\" sends a message to \"%s\" but isn't subscribed",
-			e.ClientId, e.RoomId)
-		return
-	}
-
-	switch e.Action {
-	case event.CREATE_ROOM:
-		// Check whether the client is allowed to create a new room.
-		c, exists := g.rooms["hub"].subs[e.ClientId]
-		if e.RoomId != "hub" || !exists {
-			return
-		}
-
-		id := rand.Text()
-
-		g.createRoom(c, id)
-
-		// Replace the client event to add a new room id.
-		e = event.ClientEvent{
-			Action: event.CREATE_ROOM,
-			Payload: event.EncodeOrPanic(event.CreateRoomPayload{
-				Id:     id,
-				Params: e.Payload,
-			}),
-			ClientId: e.ClientId,
-			RoomId:   e.RoomId,
-		}
 	}
 
 	raw, err := json.Marshal(e)
@@ -187,14 +124,22 @@ func (g *Gatekeeper) publish(e event.ClientEvent) {
 		log.Printf("cannot encode event from \"%s\"", e.ClientId)
 		return
 	}
-	mq.Publish(r.channel, r.id+".out", raw)
+	g.dialer.Publish("gate", raw)
 }
 
 /*
-Destroy destroys all rooms in a gatekeeper.
+consume notifies the subscribed clients about the consumed server event.
 */
-func (g *Gatekeeper) Destroy() {
-	for _, r := range g.rooms {
-		r.destroy()
+func (g *Gatekeeper) consume(raw []byte) {
+	// TODO: route the event to the corresponding room.
+	g.notify("hub", raw)
+}
+
+/*
+notify sends the specified raw message to all clients, subscribed to the roomId.
+*/
+func (g *Gatekeeper) notify(roomId string, raw []byte) {
+	for sub := range g.subs[roomId] {
+		sub.send <- raw
 	}
 }
