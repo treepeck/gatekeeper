@@ -1,13 +1,11 @@
 package ws
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"log"
 
 	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/BelikovArtem/gatekeeper/pkg/mq"
-	"github.com/gorilla/websocket"
 )
 
 /*
@@ -19,7 +17,7 @@ type Gatekeeper struct {
 	dialer         mq.Dialer
 	unregister     chan *client
 	bus            chan event.ClientEvent
-	Register       chan *websocket.Conn
+	Register       chan *client
 	subs           map[string]map[*client]struct{}
 }
 
@@ -35,7 +33,7 @@ func NewGatekeeper(d mq.Dialer) *Gatekeeper {
 		dialer:     d,
 		unregister: make(chan *client),
 		bus:        make(chan event.ClientEvent),
-		Register:   make(chan *websocket.Conn),
+		Register:   make(chan *client),
 		subs:       subs,
 	}
 
@@ -53,8 +51,8 @@ gatekeeper channels and forwards them to the corresponding handlers.
 func (g *Gatekeeper) routeEvents() {
 	for {
 		select {
-		case conn := <-g.Register:
-			g.handleRegister(conn)
+		case c := <-g.Register:
+			g.handleRegister(c)
 
 		case c := <-g.unregister:
 			g.handleUnregister(c)
@@ -69,20 +67,26 @@ func (g *Gatekeeper) routeEvents() {
 handleRegister registers a new client and broadcasts the clientCounter among
 all subscribed to the "hub" room clients.
 */
-func (g *Gatekeeper) handleRegister(conn *websocket.Conn) {
+func (g *Gatekeeper) handleRegister(c *client) {
+	// Deny the connection if client wants to connect to a non-existing room.
+	if _, exists := g.subs[c.roomId]; !exists {
+		c.cleanup()
+		return
+	}
+
+	c.gatekeeper = g
+
 	g.clientsCounter++
 
-	c := newClient(rand.Text(), g, conn)
+	g.subs[c.roomId][c] = struct{}{}
 
-	c.roomId = "hub"
-
-	g.subs["hub"][c] = struct{}{}
-
+	// TODO: not all rooms want to see clientsCounter.  Maybe send the connected
+	// client id instead.
 	raw := event.EncodeOrPanic(event.ServerEvent{
 		Action:  event.CLIENTS_COUNTER,
 		Payload: event.EncodeOrPanic(g.clientsCounter),
 	})
-	g.notify("hub", raw)
+	g.notify(c.roomId, raw)
 }
 
 /*
@@ -129,11 +133,28 @@ func (g *Gatekeeper) publish(e event.ClientEvent) {
 
 /*
 consume notifies the subscribed clients about the consumed server event.
-Gatekeeper always ACK's the consuming events.
+Gatekeeper will NACK only the events that it cannot decode.
 */
 func (g *Gatekeeper) consume(raw []byte) error {
-	// TODO: route the event to the corresponding room.
-	g.notify("hub", raw)
+	var e event.ServerEvent
+	if err := json.Unmarshal(raw, &e); err != nil {
+		log.Printf("cannot decode server event: %s", err)
+		return err
+	}
+
+	switch e.Action {
+	case event.ADD_ROOM:
+		var p event.DummyPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			log.Printf("cannot decode room id: %s", err)
+			return err
+		}
+
+		// Create a new room.
+		g.subs[p.RoomId] = make(map[*client]struct{})
+	}
+
+	g.notify(e.RoomId, raw)
 
 	return nil
 }

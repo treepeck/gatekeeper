@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"crypto/rand"
 	"net/http"
 
 	"github.com/gorilla/websocket"
@@ -21,10 +22,12 @@ HTTP connection to the WebSocket protocol and registers the client in the
 Gatekeeper.
 */
 func HandleHandshake(rw http.ResponseWriter, r *http.Request, g *Gatekeeper) {
+	roomId := r.URL.Query().Get("rid")
+
 	conn, err := upgrader.Upgrade(rw, r, nil)
 	if err != nil {
 		return
 	}
 
-	g.Register <- conn
+	g.Register <- newClient(rand.Text(), roomId, conn)
 }
