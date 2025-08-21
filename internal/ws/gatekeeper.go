@@ -129,10 +129,13 @@ func (g *Gatekeeper) publish(e event.ClientEvent) {
 
 /*
 consume notifies the subscribed clients about the consumed server event.
+Gatekeeper always ACK's the consuming events.
 */
-func (g *Gatekeeper) consume(raw []byte) {
+func (g *Gatekeeper) consume(raw []byte) error {
 	// TODO: route the event to the corresponding room.
 	g.notify("hub", raw)
+
+	return nil
 }
 
 /*
