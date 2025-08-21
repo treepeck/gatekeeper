@@ -87,12 +87,12 @@ func (d Dialer) DeclareTopology() error {
 
 /*
 Consume consumes events from the queue with the specified name.  It will wait
-forever for new events until the Gatekeeper programs exists.  After consuming,
-the event will be forwarded to the callback function.
+forever for new events until the Gatekeeper shuts down.  After consuming, the
+event will be forwarded to the callback function.
 
 Panics if the queue cannot be consumed.
 */
-func (d Dialer) Consume(name string, callback func([]byte)) {
+func (d Dialer) Consume(name string, callback func([]byte) error) {
 	events, err := d.channel.Consume(name, "", false, true, false, false, nil)
 	if err != nil {
 		log.Panicf("cannot consume queue \"%s\": %s", name, err)
@@ -107,11 +107,20 @@ func (d Dialer) Consume(name string, callback func([]byte)) {
 				log.Printf("cannot unmarshal queue event: %s", err)
 				return
 			}
-			callback(d.Body)
+
+			// A non-nil error indicates that the event cannot be processed by
+			// the core server.  Those events are denied.
+			// TODO: implement black list - if some client has a lot of NACK'ed
+			// messages, deny all incomming requests.
+			if err = callback(d.Body); err != nil {
+				d.Nack(false, false)
+			} else {
+				d.Ack(false)
+			}
 		}
 	}()
 
-	// Wait forever.
+	// forever will always hang.
 	<-forever
 }
 
