@@ -26,7 +26,8 @@ handling WebSocket messages.
 type client struct {
 	id string
 	// id of the room to which the client is subscribed.
-	roomId     string
+	roomId string
+	// gatekeeper will handle the incomming client events.  Nil by default.
 	gatekeeper *Gatekeeper
 	// send must be buffered, otherwise if the goroutine writes to it but the
 	// client drops the connection, the goroutine will wait forever.
@@ -36,13 +37,13 @@ type client struct {
 	isAlive bool
 }
 
-func newClient(id string, g *Gatekeeper, conn *websocket.Conn) *client {
+func newClient(id, roomId string, conn *websocket.Conn) *client {
 	c := &client{
-		id:         id,
-		gatekeeper: g,
-		send:       make(chan []byte, 192),
-		conn:       conn,
-		isAlive:    true,
+		id:      id,
+		roomId:  roomId,
+		send:    make(chan []byte, 192),
+		conn:    conn,
+		isAlive: true,
 	}
 
 	// Set connection parameters.
@@ -131,7 +132,11 @@ func (c *client) cleanup() {
 	if c.isAlive {
 		c.isAlive = false
 		c.conn.Close()
-		c.gatekeeper.unregister <- c
+
+		if c.gatekeeper != nil {
+			c.gatekeeper.unregister <- c
+		}
+
 		close(c.send)
 	}
 }

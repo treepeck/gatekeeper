@@ -11,7 +11,9 @@ will broadcast each server event among all connected clients.
 */
 type ServerEvent struct {
 	Payload json.RawMessage `json:"p"`
-	Action  EventAction     `json:"a"`
+	// Clients subscribed to that room will recive the event.
+	RoomId string      `json:"rid"`
+	Action EventAction `json:"a"`
 }
 
 /*
@@ -56,4 +58,12 @@ func EncodeOrPanic(v any) []byte {
 		log.Panicf("cannot encode payload %v: %s", v, err)
 	}
 	return p
+}
+
+/*
+DummyPayload helps to decode a single JSON field without knowing the full object
+structure.  Used to decode a created room id.
+*/
+type DummyPayload struct {
+	RoomId string `json:"rid"`
 }
