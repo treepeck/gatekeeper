@@ -16,10 +16,13 @@ func main() {
 	env.Load(".env")
 
 	d := mq.NewDialer()
-	defer d.Connection.Close()
+
+	err := d.DeclareTopology()
+	if err != nil {
+		log.Fatalf("cannot declare topology: %s", err)
+	}
 
 	g := ws.NewGatekeeper(d)
-	defer g.Destroy()
 
 	http.HandleFunc("GET /ws", func(rw http.ResponseWriter, r *http.Request) {
 		ws.HandleHandshake(rw, r, g)

@@ -14,12 +14,14 @@ Dialer wraps a single AMQP connection to RabbitMQ.  Only a single connection is
 used to save resources and be able to handle more WebSocket clients.
 */
 type Dialer struct {
-	Connection *amqp091.Connection
+	connection *amqp091.Connection
+	channel    *amqp091.Channel
 }
 
 /*
 NewDialer connects to the RabbitMQ using a URL provided as an environment
-variable.  Panics if the connection cannot be established.
+variable.  Also opens a new channel after the connection is established.  Panics
+if the connection cannot be established or the channel cannot be opened.
 */
 func NewDialer() Dialer {
 	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
@@ -27,74 +29,77 @@ func NewDialer() Dialer {
 		log.Panicf("cannot connect to RabbitMQ: %s", err)
 	}
 
-	return Dialer{
-		Connection: conn,
-	}
-}
-
-/*
-OpenChannel opens a unique channel and puts it into a confirm mode, which allow
-waiting for ACK or NACK from the server.
-*/
-func (d Dialer) OpenChannel() (*amqp091.Channel, error) {
-	ch, err := d.Connection.Channel()
+	ch, err := conn.Channel()
 	if err != nil {
-		return nil, err
+		conn.Close()
+		log.Panicf("cannot open a channel: %s", err)
 	}
 
 	err = ch.Confirm(false)
 	if err != nil {
 		ch.Close()
-		return nil, err
+		conn.Close()
+		log.Panicf("cannot put the channel into a confirm mode: %s", err)
 	}
 
-	return ch, err
+	return Dialer{
+		connection: conn,
+		channel:    ch,
+	}
 }
 
 /*
-DeclareAndBindQueues uses the provided channel to declare two queues, in and
-out.  Each queue name is prefixed with the specified name.  After declaring the
-queues, they are bound to the "hub" exchange, which serves as the event bus for
-all events in the system.
+DeclareTopology declares the hub topic exchange, and two queues: gate and core.
+After declaring the queues, they are bound to the exchange, which serves as the
+event bus for all events in the system.
 
-Gatekeeper should not call this function.  Each room is only a publisher and
-consumer to the queues, created by the core server.  That way it will be easier
-to manage the lifecycle of the queues.
+The gate queue is consumed by the core server, and the gatekeeper will publish
+incomming client events to it.  The core queue is consumed by the gatekeeper,
+and the core server will publish server events to it.
+
+Do not call this function from the core server, since it's a gatekeeper's
+responsibility to manage the lifecycle of queues and the exchange.
 */
-func DeclareAndBindQueues(ch *amqp091.Channel, name string) error {
-	in, err := ch.QueueDeclare(name+".in", false, true, false, false, nil)
+func (d Dialer) DeclareTopology() error {
+	err := d.channel.ExchangeDeclare("hub", "topic", false, true, false, false, nil)
 	if err != nil {
 		return err
 	}
 
-	out, err := ch.QueueDeclare(name+".out", false, true, false, false, nil)
+	gate, err := d.channel.QueueDeclare("gate", false, true, false, false, nil)
 	if err != nil {
 		return err
 	}
 
-	err = ch.QueueBind(in.Name, in.Name, "hub", false, nil)
+	core, err := d.channel.QueueDeclare("core", false, true, false, false, nil)
 	if err != nil {
 		return err
 	}
 
-	err = ch.QueueBind(out.Name, out.Name, "hub", false, nil)
+	err = d.channel.QueueBind(gate.Name, gate.Name, "hub", false, nil)
+	if err != nil {
+		return err
+	}
+
+	err = d.channel.QueueBind(core.Name, core.Name, "hub", false, nil)
 	return err
 }
 
 /*
 Consume consumes events from the queue with the specified name.  It will wait
-for new events until the caller sends a signal on a stop channel.  It is the
-caller's responsibility to stop the consuming process.  After consuming, the
-event will be forwarded to the callback function.
+forever for new events until the Gatekeeper programs exists.  After consuming,
+the event will be forwarded to the callback function.
 
 Panics if the queue cannot be consumed.
 */
-func Consume(ch *amqp091.Channel, name string, stop <-chan struct{}, callback func([]byte)) {
-	events, err := ch.Consume(name, "", false, true, false, false, nil)
+func (d Dialer) Consume(name string, callback func([]byte)) {
+	events, err := d.channel.Consume(name, "", false, true, false, false, nil)
 	if err != nil {
 		log.Panicf("cannot consume queue \"%s\": %s", name, err)
 		return
 	}
+
+	forever := make(<-chan struct{})
 
 	go func() {
 		for d := range events {
@@ -106,7 +111,8 @@ func Consume(ch *amqp091.Channel, name string, stop <-chan struct{}, callback fu
 		}
 	}()
 
-	<-stop
+	// Wait forever.
+	<-forever
 }
 
 /*
@@ -114,11 +120,11 @@ Publish publishes an event to the queue with the specified name via the
 specified channel.  It waits up to 5 seconds for the event to be published;
 otherwise, an error is logged.
 */
-func Publish(ch *amqp091.Channel, name string, raw []byte) {
+func (d Dialer) Publish(name string, raw []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := ch.PublishWithContext(
+	err := d.channel.PublishWithContext(
 		ctx,
 		"hub",
 		name,
