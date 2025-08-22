@@ -1,4 +1,5 @@
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
+[![Go Reference](https://pkg.go.dev/badge/github.com/BelikovArtem/gatekeeper.svg)](https://pkg.go.dev/github.com/BelikovArtem/gatekeeper)
 
 The main idea is to decouple core application logic from WebSocket connection<br/>
 management, enabling multiple modular instances to publish events to a central server.
