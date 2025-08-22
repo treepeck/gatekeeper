@@ -1,7 +1,6 @@
 package env
 
 import (
-	"log"
 	"os"
 	"strings"
 )
@@ -11,10 +10,10 @@ Load parses the specified file and sets environment variables for the current
 process.  Accepted format for a variable: KEY=VALUE.  Comments which begin with
 '#' and empty lines are ignored.
 */
-func Load(envPath string) {
+func Load(envPath string) error {
 	env, err := os.ReadFile(envPath)
 	if err != nil {
-		log.Fatalf("%s file cannot be read %v", envPath, err)
+		return err
 	}
 
 	for line := range strings.SplitSeq(string(env), "\n") {
@@ -31,4 +30,6 @@ func Load(envPath string) {
 
 		os.Setenv(pair[0], pair[1])
 	}
+
+	return nil
 }

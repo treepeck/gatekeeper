@@ -27,8 +27,8 @@ type client struct {
 	id string
 	// id of the room to which the client is subscribed.
 	roomId string
-	// gatekeeper will handle the incomming client events.  Nil by default.
-	gatekeeper *Gatekeeper
+	// server will handle the incomming client events.
+	server *Server
 	// send must be buffered, otherwise if the goroutine writes to it but the
 	// client drops the connection, the goroutine will wait forever.
 	send chan []byte
@@ -37,9 +37,13 @@ type client struct {
 	isAlive bool
 }
 
-func newClient(id, roomId string, conn *websocket.Conn) *client {
+/*
+newClient creates a new client and sets the WebSocket connection properties.
+*/
+func newClient(id, roomId string, s *Server, conn *websocket.Conn) *client {
 	c := &client{
 		id:      id,
+		server:  s,
 		roomId:  roomId,
 		send:    make(chan []byte, 192),
 		conn:    conn,
@@ -50,9 +54,6 @@ func newClient(id, roomId string, conn *websocket.Conn) *client {
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetPongHandler(c.pongHandler)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-
-	go c.read()
-	go c.write()
 
 	return c
 }
@@ -66,17 +67,20 @@ func (c *client) read() {
 		c.cleanup()
 	}()
 
-	var e event.ClientEvent
+	var e event.ExternalEvent
 	for {
 		err := c.conn.ReadJSON(&e)
 		if err != nil {
 			return
 		}
 
-		e.RoomId = c.roomId
-		e.ClientId = c.id
-
-		c.gatekeeper.bus <- e
+		c.server.Bus <- event.InternalEvent{
+			Action:  e.Action,
+			Payload: e.Payload,
+			// Add metadata to the event.
+			ClientId: c.id,
+			RoomId:   c.roomId,
+		}
 	}
 }
 
@@ -132,11 +136,7 @@ func (c *client) cleanup() {
 	if c.isAlive {
 		c.isAlive = false
 		c.conn.Close()
-
-		if c.gatekeeper != nil {
-			c.gatekeeper.unregister <- c
-		}
-
+		c.server.unregister <- c
 		close(c.send)
 	}
 }

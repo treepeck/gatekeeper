@@ -7,7 +7,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// upgrader is used to establish a WebSocket connection.
+/*
+upgrader is used to establish a WebSocket connection.  It is safe for concurrent
+use.
+*/
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -17,17 +20,19 @@ var upgrader = websocket.Upgrader{
 }
 
 /*
-HandleHandshake handles incomming WebSocket handshake-requests, upgrades the
-HTTP connection to the WebSocket protocol and registers the client in the
-Gatekeeper.
+HandleHandshake handles incomming WebSocket requests, upgrades the HTTP
+connection to the WebSocket protocol and registers the client to the [Server].
 */
-func HandleHandshake(rw http.ResponseWriter, r *http.Request, g *Gatekeeper) {
+func HandleHandshake(rw http.ResponseWriter, r *http.Request, s *Server) {
 	roomId := r.URL.Query().Get("rid")
 
 	conn, err := upgrader.Upgrade(rw, r, nil)
 	if err != nil {
+		// Upgrader writes the response, so simply return here.
 		return
 	}
 
-	g.Register <- newClient(rand.Text(), roomId, conn)
+	c := newClient(rand.Text(), roomId, s, conn)
+
+	s.register <- c
 }
