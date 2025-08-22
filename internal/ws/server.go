@@ -141,12 +141,8 @@ func (s *Server) encodeAndNotify(e event.ExternalEvent, roomId string) error {
 		return err
 	}
 
-	// Encode event.
-	if err == nil {
-		for sub := range s.subs[roomId] {
-			sub.send <- raw
-		}
+	for sub := range s.subs[roomId] {
+		sub.send <- raw
 	}
-
-	return err
+	return nil
 }
