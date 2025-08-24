@@ -14,8 +14,10 @@ and clients.
 */
 type ExternalEvent struct {
 	// Concrette payload type depends on event action.
-	Payload json.RawMessage `json:"p"`
-	Action  EventAction     `json:"a"`
+	Payload  json.RawMessage `json:"p"`
+	ClientId string          `json:"-"`
+	RoomId   string          `json:"-"`
+	Action   EventAction     `json:"a"`
 }
 
 /*
@@ -41,7 +43,9 @@ type EventAction int
 
 const (
 	// Server events.
-	ADD_CLIENT EventAction = iota
+	CLIENTS_COUNTER EventAction = iota
+	ADD_CLIENT
+	REMOVE_CLIENT
 	REDIRECT
 	ADD_ROOM
 	REMOVE_ROOM
@@ -49,6 +53,7 @@ const (
 
 	// Client events.
 	CREATE_ROOM
+	CHAT
 )
 
 /*

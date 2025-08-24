@@ -52,7 +52,7 @@ func main() {
 
 	// Run the goroutines which will run untill the program exits.
 	go s.Run()
-	go mq.Consume(ch, "core", s.Bus)
+	go mq.Consume(ch, "core", s.InternalBus)
 
 	// Handle incomming requests.
 	http.HandleFunc("GET /ws", func(rw http.ResponseWriter, r *http.Request) {

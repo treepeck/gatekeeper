@@ -74,13 +74,11 @@ func (c *client) read() {
 			return
 		}
 
-		c.server.Bus <- event.InternalEvent{
-			Action:  e.Action,
-			Payload: e.Payload,
-			// Add metadata to the event.
-			ClientId: c.id,
-			RoomId:   c.roomId,
-		}
+		// Add event metadata.
+		e.ClientId = c.id
+		e.RoomId = c.roomId
+
+		c.server.ExternalBus <- e
 	}
 }
 
