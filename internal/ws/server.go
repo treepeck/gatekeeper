@@ -20,8 +20,10 @@ type Server struct {
 	register       chan *client
 	unregister     chan *client
 	// Incomming client events.
-	Bus  chan event.InternalEvent
-	subs map[string]map[*client]struct{}
+	ExternalBus chan event.ExternalEvent
+	// Incomming server events.
+	InternalBus chan event.InternalEvent
+	subs        map[string]map[*client]struct{}
 }
 
 /*
@@ -33,11 +35,12 @@ func NewServer(ch *amqp091.Channel) *Server {
 	subs["hub"] = make(map[*client]struct{})
 
 	return &Server{
-		channel:    ch,
-		register:   make(chan *client),
-		unregister: make(chan *client),
-		Bus:        make(chan event.InternalEvent),
-		subs:       subs,
+		channel:     ch,
+		register:    make(chan *client),
+		unregister:  make(chan *client),
+		ExternalBus: make(chan event.ExternalEvent),
+		InternalBus: make(chan event.InternalEvent),
+		subs:        subs,
 	}
 }
 
@@ -54,12 +57,11 @@ func (s *Server) Run() {
 		case c := <-s.unregister:
 			s.handleUnregister(c)
 
-		case e := <-s.Bus:
-			if e.Action > event.CREATE_ROOM {
-				s.publish(e)
-			} else {
-				s.handleInternalEvent(e)
-			}
+		case e := <-s.ExternalBus:
+			s.handleExternalEvent(e)
+
+		case e := <-s.InternalBus:
+			s.handleInternalEvent(e)
 		}
 	}
 }
@@ -85,7 +87,7 @@ func (s *Server) handleRegister(c *client) {
 	go c.write()
 
 	s.encodeAndNotify(event.ExternalEvent{
-		Action:  event.ADD_CLIENT,
+		Action:  event.CLIENTS_COUNTER,
 		Payload: event.EncodeOrPanic(s.clientsCounter),
 	}, "hub")
 }
@@ -100,18 +102,27 @@ func (s *Server) handleUnregister(c *client) {
 	delete(s.subs[c.roomId], c)
 
 	s.encodeAndNotify(event.ExternalEvent{
-		Action:  event.ADD_CLIENT,
+		Action:  event.CLIENTS_COUNTER,
 		Payload: event.EncodeOrPanic(s.clientsCounter),
 	}, "hub")
 }
 
 /*
-publish accepts the incomming [InternalEvent] and publishes it into a gate queue.
+handleExternalEvent accepts the incomming [ExternalEvent] and publishes it into a gate queue.
 */
-func (s *Server) publish(e event.InternalEvent) {
+func (s *Server) handleExternalEvent(e event.ExternalEvent) {
 	raw, err := json.Marshal(e)
 	if err != nil {
 		log.Printf("cannot encode event from \"%s\"", e.ClientId)
+		return
+	}
+
+	switch e.Action {
+	case event.CHAT:
+		for sub := range s.subs[e.RoomId] {
+			sub.send <- raw
+		}
+		// No need to pass the chat message to the core server.
 		return
 	}
 
@@ -124,6 +135,24 @@ handleInternalEvent accepts the incomming [InternalEvent], removes the metadata
 and notifies the subscribed clients about the event.
 */
 func (s *Server) handleInternalEvent(e event.InternalEvent) {
+	switch e.Action {
+	case event.ADD_ROOM:
+		var p event.DummyPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return
+		}
+
+		s.subs[p.RoomId] = make(map[*client]struct{})
+
+	case event.REMOVE_ROOM:
+		var p event.DummyPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return
+		}
+
+		delete(s.subs, p.RoomId)
+	}
+
 	s.encodeAndNotify(event.ExternalEvent{
 		Action:  e.Action,
 		Payload: e.Payload,
