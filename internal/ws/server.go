@@ -111,18 +111,24 @@ func (s *Server) handleUnregister(c *client) {
 handleExternalEvent accepts the incomming [ExternalEvent] and publishes it into a gate queue.
 */
 func (s *Server) handleExternalEvent(e event.ExternalEvent) {
-	raw, err := json.Marshal(e)
-	if err != nil {
-		log.Printf("cannot encode event from \"%s\"", e.ClientId)
-		return
-	}
-
 	switch e.Action {
 	case event.CHAT:
+		raw, err := json.Marshal(e)
+		if err != nil {
+			log.Printf("cannot encode event from \"%s\"", e.ClientId)
+			return
+		}
+
 		for sub := range s.subs[e.RoomId] {
 			sub.send <- raw
 		}
 		// No need to pass the chat message to the core server.
+		return
+	}
+
+	raw, err := json.Marshal(event.InternalEvent(e))
+	if err != nil {
+		log.Printf("cannot encode event from \"%s\"", e.ClientId)
 		return
 	}
 
@@ -137,20 +143,24 @@ and notifies the subscribed clients about the event.
 func (s *Server) handleInternalEvent(e event.InternalEvent) {
 	switch e.Action {
 	case event.ADD_ROOM:
-		var p event.DummyPayload
-		if err := json.Unmarshal(e.Payload, &p); err != nil {
+		var id string
+		if err := json.Unmarshal(e.Payload, &id); err != nil {
+			log.Print(err)
 			return
 		}
 
-		s.subs[p.RoomId] = make(map[*client]struct{})
+		s.subs[id] = make(map[*client]struct{})
+		return
 
 	case event.REMOVE_ROOM:
-		var p event.DummyPayload
-		if err := json.Unmarshal(e.Payload, &p); err != nil {
+		var id string
+		if err := json.Unmarshal(e.Payload, &id); err != nil {
+			log.Print(err)
 			return
 		}
 
-		delete(s.subs, p.RoomId)
+		delete(s.subs, id)
+		return
 	}
 
 	s.encodeAndNotify(event.ExternalEvent{

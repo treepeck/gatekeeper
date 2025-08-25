@@ -52,7 +52,6 @@ const (
 	UPDATE_ROOM
 
 	// Client events.
-	CREATE_ROOM
 	CHAT
 )
 
@@ -66,12 +65,4 @@ func EncodeOrPanic(v any) []byte {
 		log.Panicf("cannot encode payload %v: %s", v, err)
 	}
 	return p
-}
-
-/*
-DummyPayload helps to decode a single JSON field without knowing the full object
-structure.  Used to decode a created room id.
-*/
-type DummyPayload struct {
-	RoomId string `json:"id"`
 }
