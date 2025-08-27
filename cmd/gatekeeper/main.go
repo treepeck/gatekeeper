@@ -13,41 +13,42 @@ import (
 )
 
 func main() {
-	// Set up logger.
 	log.SetFlags(log.Lshortfile | log.Ldate | log.Ltime)
 
-	// Load environment variables.
+	log.Print("Loading environment variables.")
 	if err := env.Load(".env"); err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
+	log.Print("Successfully loaded environment variables.")
 
-	// Connect to RabbitMQ.
+	log.Print("Connecting to RabbitMQ.")
 	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
+	defer conn.Close()
 
 	// Open an AMQP channel.
 	ch, err := conn.Channel()
 	if err != nil {
-		conn.Close()
-		log.Fatal(err)
+		log.Panic(err)
 	}
+	defer ch.Close()
 
 	// Put the channel into a confirm mode.
 	err = ch.Confirm(false)
 	if err != nil {
-		ch.Close()
-		conn.Close()
-		log.Fatal(err)
+		log.Panic(err)
 	}
 
 	// Declare the MQ topology.  See the doc/arch.png file.
 	err = mq.DeclareTopology(ch)
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
+	log.Printf("Successfully connected to RabbitMQ.")
 
+	log.Print("Starting server.")
 	s := ws.NewServer(ch)
 
 	// Run the goroutines which will run untill the program exits.
