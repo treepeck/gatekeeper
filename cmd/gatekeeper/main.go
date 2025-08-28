@@ -7,9 +7,9 @@ import (
 
 	"github.com/rabbitmq/amqp091-go"
 
-	"github.com/BelikovArtem/gatekeeper/internal/ws"
-	"github.com/BelikovArtem/gatekeeper/pkg/env"
-	"github.com/BelikovArtem/gatekeeper/pkg/mq"
+	"github.com/treepeck/gatekeeper/internal/ws"
+	"github.com/treepeck/gatekeeper/pkg/env"
+	"github.com/treepeck/gatekeeper/pkg/mq"
 )
 
 func main() {

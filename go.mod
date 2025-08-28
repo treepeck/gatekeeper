@@ -1,4 +1,4 @@
-module github.com/BelikovArtem/gatekeeper
+module github.com/treepeck/gatekeeper
 
 go 1.24.4
 

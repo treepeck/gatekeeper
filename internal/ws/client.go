@@ -3,8 +3,9 @@ package ws
 import (
 	"time"
 
-	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/gorilla/websocket"
+
+	"github.com/treepeck/gatekeeper/pkg/event"
 )
 
 // Connection parameters.

@@ -6,8 +6,8 @@ import (
 
 	"github.com/rabbitmq/amqp091-go"
 
-	"github.com/BelikovArtem/gatekeeper/pkg/event"
-	"github.com/BelikovArtem/gatekeeper/pkg/mq"
+	"github.com/treepeck/gatekeeper/pkg/event"
+	"github.com/treepeck/gatekeeper/pkg/mq"
 )
 
 /*
