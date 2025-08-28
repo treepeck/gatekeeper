@@ -87,7 +87,7 @@ func (s *Server) handleRegister(c *client) {
 	go c.write()
 
 	s.encodeAndNotify(event.ExternalEvent{
-		Action:  event.CLIENTS_COUNTER,
+		Action:  event.ClientsCounter,
 		Payload: event.EncodeOrPanic(s.clientsCounter),
 	}, "hub")
 }
@@ -102,7 +102,7 @@ func (s *Server) handleUnregister(c *client) {
 	delete(s.subs[c.roomId], c)
 
 	s.encodeAndNotify(event.ExternalEvent{
-		Action:  event.CLIENTS_COUNTER,
+		Action:  event.ClientsCounter,
 		Payload: event.EncodeOrPanic(s.clientsCounter),
 	}, "hub")
 }
@@ -112,7 +112,7 @@ handleExternalEvent accepts the incomming [ExternalEvent] and publishes it into 
 */
 func (s *Server) handleExternalEvent(e event.ExternalEvent) {
 	switch e.Action {
-	case event.CHAT:
+	case event.Chat:
 		raw, err := json.Marshal(e)
 		if err != nil {
 			log.Printf("cannot encode event from \"%s\"", e.ClientId)
@@ -142,7 +142,7 @@ and notifies the subscribed clients about the event.
 */
 func (s *Server) handleInternalEvent(e event.InternalEvent) {
 	switch e.Action {
-	case event.ADD_ROOM:
+	case event.AddRoom:
 		var id string
 		if err := json.Unmarshal(e.Payload, &id); err != nil {
 			log.Print(err)
@@ -152,7 +152,7 @@ func (s *Server) handleInternalEvent(e event.InternalEvent) {
 		s.subs[id] = make(map[*client]struct{})
 		return
 
-	case event.REMOVE_ROOM:
+	case event.RemoveRoom:
 		var id string
 		if err := json.Unmarshal(e.Payload, &id); err != nil {
 			log.Print(err)

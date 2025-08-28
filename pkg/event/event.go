@@ -39,20 +39,13 @@ type InternalEvent struct {
 EventAction is a domain of possible actions.  The core server can declare custom
 event action.
 */
-type EventAction int
+type EventAction string
 
 const (
-	// Server events.
-	CLIENTS_COUNTER EventAction = iota
-	ADD_CLIENT
-	REMOVE_CLIENT
-	REDIRECT
-	ADD_ROOM
-	REMOVE_ROOM
-	UPDATE_ROOM
-
-	// Client events.
-	CHAT
+	ClientsCounter EventAction = "cc"
+	AddRoom        EventAction = "ar"
+	RemoveRoom     EventAction = "rr"
+	Chat           EventAction = "c"
 )
 
 /*
