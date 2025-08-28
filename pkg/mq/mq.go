@@ -9,8 +9,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/BelikovArtem/gatekeeper/pkg/event"
 	"github.com/rabbitmq/amqp091-go"
+
+	"github.com/treepeck/gatekeeper/pkg/event"
 )
 
 /*
