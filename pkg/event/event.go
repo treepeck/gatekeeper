@@ -9,11 +9,12 @@ import (
 )
 
 /*
-ExternalEvent represents an event type which is exchanged between the Gatekeeper
-and clients.
+ExternalEvent represents an event type exchanged between the Gatekeeper and
+WebSocket clients.  ClientId and RoomId are metadata fields that are excluded
+from the JSON and added by the client structure.  Payload is an arbitrary
+JSON-encoded object whose concrete type depends on the [EventAction].
 */
 type ExternalEvent struct {
-	// Concrette payload type depends on event action.
 	Payload  json.RawMessage `json:"p"`
 	ClientId string          `json:"-"`
 	RoomId   string          `json:"-"`
@@ -22,17 +23,14 @@ type ExternalEvent struct {
 
 /*
 InternalEvent represents an event type which is exchanged between the Gatekeeper
-and the core server.  Internal event contains metadata which helps to identify
-the sender and route the room which will handle it.
+and the core server.  Internal event's JSON contains a metadata which helps to
+identify the sender and route the event to the room which will handle it.
 */
 type InternalEvent struct {
-	// Concrette payload type depends on event action.
-	Payload json.RawMessage `json:"p"`
-	// Sender id.
-	ClientId string `json:"cid"`
-	// Room which will recieve an event.
-	RoomId string      `json:"rid"`
-	Action EventAction `json:"a"`
+	Payload  json.RawMessage `json:"p"`
+	ClientId string          `json:"cid"`
+	RoomId   string          `json:"rid"`
+	Action   EventAction     `json:"a"`
 }
 
 /*
@@ -45,6 +43,7 @@ const (
 	ClientsCounter EventAction = "cc"
 	AddRoom        EventAction = "ar"
 	RemoveRoom     EventAction = "rr"
+	Matchmaking    EventAction = "mm"
 	Chat           EventAction = "c"
 )
 

@@ -108,10 +108,17 @@ func (s *Server) handleUnregister(c *client) {
 }
 
 /*
-handleExternalEvent accepts the incomming [ExternalEvent] and publishes it into a gate queue.
+handleExternalEvent accepts the incomming [ExternalEvent] and publishes it into
+a gate queue.  Denies the Matchmaking event if the client isn't in the hub room.
 */
 func (s *Server) handleExternalEvent(e event.ExternalEvent) {
 	switch e.Action {
+	case event.Matchmaking:
+		// RoomId is always the room to which the client is subscribed.
+		if e.RoomId != "hub" {
+			return // Deny the request.
+		}
+
 	case event.Chat:
 		raw, err := json.Marshal(e)
 		if err != nil {
@@ -122,8 +129,7 @@ func (s *Server) handleExternalEvent(e event.ExternalEvent) {
 		for sub := range s.subs[e.RoomId] {
 			sub.send <- raw
 		}
-		// No need to pass the chat message to the core server.
-		return
+		return // No need to pass the chat message to the core server.
 	}
 
 	raw, err := json.Marshal(event.InternalEvent(e))

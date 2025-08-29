@@ -75,7 +75,7 @@ func (c *client) read() {
 			return
 		}
 
-		// Add event metadata.
+		// Add the event metadata.
 		e.ClientId = c.id
 		e.RoomId = c.roomId
 
