@@ -44,8 +44,18 @@ const (
 	AddRoom        EventAction = "ar"
 	RemoveRoom     EventAction = "rr"
 	Matchmaking    EventAction = "mm"
+	Redirect       EventAction = "r"
 	Chat           EventAction = "c"
 )
+
+/*
+AddRoomPayload is a predefined payload type.  Each message AddRoom event must
+have exactly this type of payload.
+*/
+type AddRoomPayload struct {
+	Id   string   `json:"id"`
+	Subs []string `json:"s"`
+}
 
 /*
 EncodeOrPanic is a helper function to encode a JSON payload on the fly skipping

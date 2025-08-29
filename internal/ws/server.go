@@ -23,7 +23,7 @@ type Server struct {
 	ExternalBus chan event.ExternalEvent
 	// Incomming server events.
 	InternalBus chan event.InternalEvent
-	subs        map[string]map[*client]struct{}
+	subs        map[string]map[string]*client
 }
 
 /*
@@ -31,8 +31,8 @@ NewServer initializes the [Server] fields and adds the default "hub" record
 in the subscribtion map.
 */
 func NewServer(ch *amqp091.Channel) *Server {
-	subs := make(map[string]map[*client]struct{}, 1)
-	subs["hub"] = make(map[*client]struct{})
+	subs := make(map[string]map[string]*client, 1)
+	subs["hub"] = make(map[string]*client)
 
 	return &Server{
 		channel:     ch,
@@ -80,7 +80,7 @@ func (s *Server) handleRegister(c *client) {
 
 	// Add the subscribtion record.
 	s.clientsCounter++
-	s.subs[c.roomId][c] = struct{}{}
+	s.subs[c.roomId][c.id] = c
 
 	// Run the client's goroutines.
 	go c.read()
@@ -99,7 +99,7 @@ all subscribed to the "hub" room clients.
 func (s *Server) handleUnregister(c *client) {
 	// Delete the subscribtion record.
 	s.clientsCounter--
-	delete(s.subs[c.roomId], c)
+	delete(s.subs[c.roomId], c.id)
 
 	s.encodeAndNotify(event.ExternalEvent{
 		Action:  event.ClientsCounter,
@@ -126,7 +126,7 @@ func (s *Server) handleExternalEvent(e event.ExternalEvent) {
 			return
 		}
 
-		for sub := range s.subs[e.RoomId] {
+		for _, sub := range s.subs[e.RoomId] {
 			sub.send <- raw
 		}
 		return // No need to pass the chat message to the core server.
@@ -149,13 +149,21 @@ and notifies the subscribed clients about the event.
 func (s *Server) handleInternalEvent(e event.InternalEvent) {
 	switch e.Action {
 	case event.AddRoom:
-		var id string
-		if err := json.Unmarshal(e.Payload, &id); err != nil {
+		var p event.AddRoomPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			log.Print(err)
 			return
 		}
 
-		s.subs[id] = make(map[*client]struct{})
+		s.subs[p.Id] = make(map[string]*client, len(p.Subs))
+		// Send redirect to clients.
+		raw := event.EncodeOrPanic(event.ExternalEvent{
+			Action:  event.Redirect,
+			Payload: event.EncodeOrPanic(p.Id),
+		})
+		for _, id := range p.Subs {
+			s.subs["hub"][id].send <- raw
+		}
 		return
 
 	case event.RemoveRoom:
@@ -186,7 +194,7 @@ func (s *Server) encodeAndNotify(e event.ExternalEvent, roomId string) error {
 		return err
 	}
 
-	for sub := range s.subs[roomId] {
+	for _, sub := range s.subs[roomId] {
 		sub.send <- raw
 	}
 	return nil
