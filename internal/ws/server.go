@@ -23,7 +23,7 @@ type Server struct {
 	ExternalBus chan event.ExternalEvent
 	// Incomming server events.
 	InternalBus chan event.InternalEvent
-	subs        map[string]map[string]*client
+	subman      *subman
 }
 
 /*
@@ -31,16 +31,13 @@ NewServer initializes the [Server] fields and adds the default "hub" record
 in the subscribtion map.
 */
 func NewServer(ch *amqp091.Channel) *Server {
-	subs := make(map[string]map[string]*client, 1)
-	subs["hub"] = make(map[string]*client)
-
 	return &Server{
 		channel:     ch,
 		register:    make(chan *client),
 		unregister:  make(chan *client),
 		ExternalBus: make(chan event.ExternalEvent),
 		InternalBus: make(chan event.InternalEvent),
-		subs:        subs,
+		subman:      newSubman(),
 	}
 }
 
@@ -73,14 +70,20 @@ all subscribed to the "hub" room clients.
 func (s *Server) handleRegister(c *client) {
 	// Deny the connection if the client wants to connect to a room which does
 	// not exist.
-	if _, exists := s.subs[c.roomId]; !exists {
+	if _, exists := s.subman.byRoom[c.roomId]; !exists {
+		c.conn.Close()
+		return
+	}
+
+	// Deny multiple connection from a single peer.
+	if _, exists := s.subman.byClient[c.id]; exists {
 		c.conn.Close()
 		return
 	}
 
 	// Add the subscribtion record.
 	s.clientsCounter++
-	s.subs[c.roomId][c.id] = c
+	s.subman.addClient(c)
 
 	// Run the client's goroutines.
 	go c.read()
@@ -99,7 +102,7 @@ all subscribed to the "hub" room clients.
 func (s *Server) handleUnregister(c *client) {
 	// Delete the subscribtion record.
 	s.clientsCounter--
-	delete(s.subs[c.roomId], c.id)
+	s.subman.removeClient(c)
 
 	s.encodeAndNotify(event.ExternalEvent{
 		Action:  event.ClientsCounter,
@@ -126,7 +129,7 @@ func (s *Server) handleExternalEvent(e event.ExternalEvent) {
 			return
 		}
 
-		for _, sub := range s.subs[e.RoomId] {
+		for sub := range s.subman.byRoom[e.RoomId] {
 			sub.send <- raw
 		}
 		return // No need to pass the chat message to the core server.
@@ -154,15 +157,14 @@ func (s *Server) handleInternalEvent(e event.InternalEvent) {
 			log.Print(err)
 			return
 		}
-
-		s.subs[p.Id] = make(map[string]*client, len(p.Subs))
+		s.subman.addRoom(p.Id)
 		// Send redirect to clients.
 		raw := event.EncodeOrPanic(event.ExternalEvent{
 			Action:  event.Redirect,
 			Payload: event.EncodeOrPanic(p.Id),
 		})
 		for _, id := range p.Subs {
-			s.subs["hub"][id].send <- raw
+			s.subman.byClient[id].send <- raw
 		}
 		return
 
@@ -173,7 +175,7 @@ func (s *Server) handleInternalEvent(e event.InternalEvent) {
 			return
 		}
 
-		delete(s.subs, id)
+		s.subman.removeRoom(id)
 		return
 	}
 
@@ -194,7 +196,7 @@ func (s *Server) encodeAndNotify(e event.ExternalEvent, roomId string) error {
 		return err
 	}
 
-	for _, sub := range s.subs[roomId] {
+	for sub := range s.subman.byRoom[roomId] {
 		sub.send <- raw
 	}
 	return nil
