@@ -5,11 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/rabbitmq/amqp091-go"
-
 	"github.com/treepeck/gatekeeper/internal/ws"
 	"github.com/treepeck/gatekeeper/pkg/env"
-	"github.com/treepeck/gatekeeper/pkg/mq"
 )
 
 func main() {
@@ -21,43 +18,54 @@ func main() {
 	}
 	log.Print("Successfully loaded environment variables.")
 
-	log.Print("Connecting to RabbitMQ.")
-	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
-	if err != nil {
-		log.Panic(err)
-	}
-	defer conn.Close()
+	/*
+		log.Print("Connecting to RabbitMQ.")
+		conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
+		if err != nil {
+			log.Panic(err)
+		}
+		defer conn.Close()
 
-	// Open an AMQP channel.
-	ch, err := conn.Channel()
-	if err != nil {
-		log.Panic(err)
-	}
-	defer ch.Close()
 
-	// Put the channel into a confirm mode.
-	err = ch.Confirm(false)
-	if err != nil {
-		log.Panic(err)
-	}
+		// Open an AMQP channel.
+		ch, err := conn.Channel()
+		if err != nil {
+			log.Panic(err)
+		}
+		defer ch.Close()
 
-	// Declare the MQ topology.  See the doc/arch.png file.
-	err = mq.DeclareTopology(ch)
-	if err != nil {
-		log.Panic(err)
-	}
-	log.Printf("Successfully connected to RabbitMQ.")
+		// Put the channel into a confirm mode.
+		err = ch.Confirm(false)
+		if err != nil {
+			log.Panic(err)
+		}
+
+		// Declare the MQ topology.  See the doc/arch.png file.
+		err = mq.DeclareTopology(ch)
+		if err != nil {
+			log.Panic(err)
+		}
+		log.Printf("Successfully connected to RabbitMQ.")
+	*/
 
 	log.Print("Starting server.")
-	s := ws.NewServer(ch)
+	s := ws.NewServer()
 
 	// Run the goroutines which will run untill the program exits.
 	go s.Run()
-	go mq.Consume(ch, "core", s.InternalBus)
 
 	// Handle incomming requests.
 	http.HandleFunc("GET /ws", func(rw http.ResponseWriter, r *http.Request) {
-		ws.HandleHandshake(rw, r, s)
+		h := ws.Handshake{
+			Request:         r,
+			ResponseWriter:  rw,
+			ResponseChannel: make(chan struct{}),
+		}
+
+		s.Register <- h
+		// Wait for the response from the handler.
+		<-h.ResponseChannel
 	})
+
 	http.ListenAndServe(os.Getenv("ADDR"), nil)
 }

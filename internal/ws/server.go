@@ -1,203 +1,67 @@
 package ws
 
 import (
-	"encoding/json"
+	"crypto/rand"
 	"log"
 
-	"github.com/rabbitmq/amqp091-go"
-
 	"github.com/treepeck/gatekeeper/pkg/event"
-	"github.com/treepeck/gatekeeper/pkg/mq"
 )
 
-/*
-Server stores the subscribtion map, handles client registration, unregistration,
-and routes the incomming events into the corresponding handlers.
-*/
 type Server struct {
-	clientsCounter int
-	channel        *amqp091.Channel
-	register       chan *client
-	unregister     chan *client
-	// Incomming client events.
-	ExternalBus chan event.ExternalEvent
-	// Incomming server events.
-	InternalBus chan event.InternalEvent
-	subman      *subman
+	Register      chan Handshake
+	unregister    chan string
+	externalEvent chan event.ExternalEvent
+	clients       map[string]*client
 }
 
-/*
-NewServer initializes the [Server] fields and adds the default "hub" record
-in the subscribtion map.
-*/
-func NewServer(ch *amqp091.Channel) *Server {
+func NewServer() *Server {
 	return &Server{
-		channel:     ch,
-		register:    make(chan *client),
-		unregister:  make(chan *client),
-		ExternalBus: make(chan event.ExternalEvent),
-		InternalBus: make(chan event.InternalEvent),
-		subman:      newSubman(),
+		Register:      make(chan Handshake),
+		unregister:    make(chan string),
+		externalEvent: make(chan event.ExternalEvent),
+		clients:       make(map[string]*client),
 	}
 }
 
-/*
-Run accepts events from the [Server] channels and calls the corresponding event
-handlers.
-*/
 func (s *Server) Run() {
 	for {
 		select {
-		case c := <-s.register:
-			s.handleRegister(c)
+		case h := <-s.Register:
+			s.handleRegister(h)
 
-		case c := <-s.unregister:
-			s.handleUnregister(c)
+		case id := <-s.unregister:
+			s.handleUnregister(id)
 
-		case e := <-s.ExternalBus:
+		case e := <-s.externalEvent:
 			s.handleExternalEvent(e)
-
-		case e := <-s.InternalBus:
-			s.handleInternalEvent(e)
 		}
 	}
 }
 
-/*
-handleRegister registers a new client and broadcasts the clientCounter among
-all subscribed to the "hub" room clients.
-*/
-func (s *Server) handleRegister(c *client) {
-	// Deny the connection if the client wants to connect to a room which does
-	// not exist.
-	if _, exists := s.subman.byRoom[c.roomId]; !exists {
-		c.conn.Close()
+func (s *Server) handleRegister(h Handshake) {
+	defer func() { h.ResponseChannel <- struct{}{} }()
+
+	conn, err := upgrader.Upgrade(h.ResponseWriter, h.Request, nil)
+	if err != nil {
 		return
 	}
 
-	// Deny multiple connection from a single peer.
-	if _, exists := s.subman.byClient[c.id]; exists {
-		c.conn.Close()
-		return
-	}
+	id := rand.Text()
+	c := newClient(s.externalEvent, s, conn)
 
-	// Add the subscribtion record.
-	s.clientsCounter++
-	s.subman.addClient(c)
-
-	// Run the client's goroutines.
-	go c.read()
+	go c.read(id)
 	go c.write()
 
-	s.encodeAndNotify(event.ExternalEvent{
-		Action:  event.ClientsCounter,
-		Payload: event.EncodeOrPanic(s.clientsCounter),
-	}, "hub")
+	s.clients[id] = c
+
+	log.Printf("client \"%s\" registered", id)
 }
 
-/*
-handleUnregister unregisters the client and broadcasts the clientCounter among
-all subscribed to the "hub" room clients.
-*/
-func (s *Server) handleUnregister(c *client) {
-	// Delete the subscribtion record.
-	s.clientsCounter--
-	s.subman.removeClient(c)
-
-	s.encodeAndNotify(event.ExternalEvent{
-		Action:  event.ClientsCounter,
-		Payload: event.EncodeOrPanic(s.clientsCounter),
-	}, "hub")
+func (s *Server) handleUnregister(id string) {
+	delete(s.clients, id)
+	log.Printf("client \"%s\" unregistered", id)
 }
 
-/*
-handleExternalEvent accepts the incomming [ExternalEvent] and publishes it into
-a gate queue.  Denies the Matchmaking event if the client isn't in the hub room.
-*/
 func (s *Server) handleExternalEvent(e event.ExternalEvent) {
-	switch e.Action {
-	case event.Matchmaking:
-		// RoomId is always the room to which the client is subscribed.
-		if e.RoomId != "hub" {
-			return // Deny the request.
-		}
-
-	case event.Chat:
-		raw, err := json.Marshal(e)
-		if err != nil {
-			log.Printf("cannot encode event from \"%s\"", e.ClientId)
-			return
-		}
-
-		for sub := range s.subman.byRoom[e.RoomId] {
-			sub.send <- raw
-		}
-		return // No need to pass the chat message to the core server.
-	}
-
-	raw, err := json.Marshal(event.InternalEvent(e))
-	if err != nil {
-		log.Printf("cannot encode event from \"%s\"", e.ClientId)
-		return
-	}
-
-	// Publish event with metadata.
-	mq.Publish(s.channel, "gate", raw)
-}
-
-/*
-handleInternalEvent accepts the incomming [InternalEvent], removes the metadata
-and notifies the subscribed clients about the event.
-*/
-func (s *Server) handleInternalEvent(e event.InternalEvent) {
-	switch e.Action {
-	case event.AddRoom:
-		var p event.AddRoomPayload
-		if err := json.Unmarshal(e.Payload, &p); err != nil {
-			log.Print(err)
-			return
-		}
-		s.subman.addRoom(p.Id)
-		// Send redirect to clients.
-		raw := event.EncodeOrPanic(event.ExternalEvent{
-			Action:  event.Redirect,
-			Payload: event.EncodeOrPanic(p.Id),
-		})
-		for _, id := range p.Subs {
-			s.subman.byClient[id].send <- raw
-		}
-		return
-
-	case event.RemoveRoom:
-		var id string
-		if err := json.Unmarshal(e.Payload, &id); err != nil {
-			log.Print(err)
-			return
-		}
-
-		s.subman.removeRoom(id)
-		return
-	}
-
-	s.encodeAndNotify(event.ExternalEvent{
-		Action:  e.Action,
-		Payload: e.Payload,
-	}, e.RoomId)
-}
-
-/*
-encodeAndNotify is a helper function that encodes the specified event and
-broadcasts it among all subscribed to roomId clients.
-*/
-func (s *Server) encodeAndNotify(e event.ExternalEvent, roomId string) error {
-	// Encode event payload.
-	raw, err := json.Marshal(e)
-	if err != nil {
-		return err
-	}
-
-	for sub := range s.subman.byRoom[roomId] {
-		sub.send <- raw
-	}
-	return nil
+	log.Print(e)
 }

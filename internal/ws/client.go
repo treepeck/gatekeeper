@@ -1,11 +1,12 @@
 package ws
 
 import (
+	"log"
 	"time"
 
-	"github.com/gorilla/websocket"
-
 	"github.com/treepeck/gatekeeper/pkg/event"
+
+	"github.com/gorilla/websocket"
 )
 
 // Connection parameters.
@@ -13,7 +14,7 @@ const (
 	// Time allowed to write a message to the peer.
 	writeWait = 10 * time.Second
 	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
+	pongWait = 30 * time.Second
 	// Send pings to peer with this period. Must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
 	// Maximum message size allowed from peer.
@@ -25,30 +26,27 @@ client wraps a single connection and provides methods for reading, writing and
 handling WebSocket messages.
 */
 type client struct {
-	id string
-	// id of the room to which the client is subscribed.
-	roomId string
 	// server will handle the incomming client events.
-	server *Server
-	// send must be buffered, otherwise if the goroutine writes to it but the
-	// client drops the connection, the goroutine will wait forever.
-	send chan []byte
-	conn *websocket.Conn
-	// is WebSocket connection alive.
-	isAlive bool
+	server  *Server
+	forward chan<- event.ExternalEvent
+	send    chan []byte
+	conn    *websocket.Conn
+	// Connection delay.
+	delay         int
+	pingTimestamp int64
 }
 
 /*
 newClient creates a new client and sets the WebSocket connection properties.
 */
-func newClient(id, roomId string, s *Server, conn *websocket.Conn) *client {
+func newClient(forward chan<- event.ExternalEvent, s *Server, conn *websocket.Conn) *client {
 	c := &client{
-		id:      id,
-		server:  s,
-		roomId:  roomId,
-		send:    make(chan []byte, 192),
-		conn:    conn,
-		isAlive: true,
+		server:        s,
+		forward:       forward,
+		send:          make(chan []byte, 192),
+		conn:          conn,
+		delay:         0,
+		pingTimestamp: time.Now().UnixMilli(),
 	}
 
 	// Set connection parameters.
@@ -63,10 +61,8 @@ func newClient(id, roomId string, s *Server, conn *websocket.Conn) *client {
 read consequentially (one at a time) reads messages from the connection and
 forwards them to the gatekeeper.
 */
-func (c *client) read() {
-	defer func() {
-		c.cleanup()
-	}()
+func (c *client) read(id string) {
+	defer c.cleanup(id)
 
 	var e event.ExternalEvent
 	for {
@@ -75,11 +71,9 @@ func (c *client) read() {
 			return
 		}
 
-		// Add the event metadata.
-		e.ClientId = c.id
-		e.RoomId = c.roomId
+		e.ClientId = id
 
-		c.server.ExternalBus <- e
+		c.forward <- e
 	}
 }
 
@@ -89,10 +83,7 @@ Automatically sends ping messages to maintain a hearbeat.
 */
 func (c *client) write() {
 	pingTicker := time.NewTicker(pingPeriod)
-	defer func() {
-		pingTicker.Stop()
-		c.cleanup()
-	}()
+	defer pingTicker.Stop()
 
 	for {
 		select {
@@ -110,8 +101,17 @@ func (c *client) write() {
 		// Send ping messages periodically.
 		case <-pingTicker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			err := c.conn.WriteMessage(websocket.PingMessage, nil)
+
+			c.pingTimestamp = time.Now().UnixMilli()
+
+			err := c.conn.WriteMessage(websocket.PingMessage, event.EncodeOrPanic(
+				event.ExternalEvent{
+					Action:  event.Ping,
+					Payload: event.EncodeOrPanic(c.delay),
+				},
+			))
 			if err != nil {
+				log.Print(err)
 				return
 			}
 		}
@@ -125,17 +125,15 @@ Sending ping and pong messages is necessary because without it the connections
 are interrupted after about 2 minutes of no message sending from the client.
 */
 func (c *client) pongHandler(appData string) error {
+	c.delay = int(time.Now().UnixMilli() - c.pingTimestamp)
 	return c.conn.SetReadDeadline(time.Now().Add(pongWait))
 }
 
 /*
 cleanup closes the connection and unregisters the client from the gatekeeper.
 */
-func (c *client) cleanup() {
-	if c.isAlive {
-		c.isAlive = false
-		c.conn.Close()
-		c.server.unregister <- c
-		close(c.send)
-	}
+func (c *client) cleanup(id string) {
+	close(c.send)
+	c.conn.Close()
+	c.server.unregister <- id
 }
