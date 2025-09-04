@@ -67,5 +67,7 @@ func main() {
 		<-h.ResponseChannel
 	})
 
-	http.ListenAndServe(os.Getenv("ADDR"), nil)
+	if err := http.ListenAndServe(os.Getenv("ADDR"), nil); err != nil {
+		log.Panic(err)
+	}
 }

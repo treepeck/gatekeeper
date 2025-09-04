@@ -1,7 +1,6 @@
 package ws
 
 import (
-	"log"
 	"time"
 
 	"github.com/treepeck/gatekeeper/pkg/event"
@@ -14,9 +13,9 @@ const (
 	// Time allowed to write a message to the peer.
 	writeWait = 10 * time.Second
 	// Time allowed to read the next pong message from the peer.
-	pongWait = 4 * time.Second
-	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
+	pongWait = 7 * time.Second
+	// Send pings to peer with this period.  Must be less than pongWait.
+	pingPeriod = 3 * time.Second
 	// Maximum message size allowed from peer.
 	maxMessageSize = 1024
 )
@@ -26,32 +25,48 @@ client wraps a single connection and provides methods for reading, writing and
 handling WebSocket messages.
 */
 type client struct {
+	// Timestamp when the last ping event was sent to measure response delay.
+	pingTimestamp time.Time
+	// Id of the room to which the client is subscribed.  Multiple subscribtions
+	// from a single client are prohibited.
+	roomId string
 	// server will handle the incomming client events.
 	server  *Server
 	forward chan<- event.ExternalEvent
-	send    chan []byte
+	send    chan event.ExternalEvent
 	conn    *websocket.Conn
-	// Connection delay.
-	delay         int
-	pingTimestamp time.Time
+	// Network delay.
+	delay int
+	// New ping event must be sent only when the client responses to the
+	// previous one.  Otherwise the delay cannot be correctly measured.
+	hasAnsweredPing bool
 }
 
 /*
 newClient creates a new client and sets the WebSocket connection properties.
 */
-func newClient(forward chan<- event.ExternalEvent, s *Server, conn *websocket.Conn) *client {
+func newClient(
+	roomId string,
+	forward chan<- event.ExternalEvent,
+	s *Server,
+	conn *websocket.Conn,
+) *client {
+	now := time.Now()
+
 	c := &client{
 		server:        s,
+		roomId:        roomId,
 		forward:       forward,
-		send:          make(chan []byte, 192),
+		send:          make(chan event.ExternalEvent, 192),
 		conn:          conn,
 		delay:         0,
-		pingTimestamp: time.Now(),
+		pingTimestamp: now,
+		// Must be true to be able to send a first ping message.
+		hasAnsweredPing: true,
 	}
 
-	// Set connection parameters.
 	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetReadDeadline(now.Add(pongWait))
 
 	return c
 }
@@ -90,33 +105,38 @@ func (c *client) write() {
 
 	for {
 		select {
-		case raw, ok := <-c.send:
+		case e, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			err := c.conn.WriteMessage(websocket.TextMessage, raw)
-			if err != nil {
+
+			if err := c.conn.WriteJSON(e); err != nil {
 				return
 			}
 
 		// Send ping messages periodically.
 		case <-pingTicker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			// Send a new ping event only if the client has already ansered to
+			// the prevous one.
+			if !c.hasAnsweredPing {
+				continue
+			}
 
-			c.pingTimestamp = time.Now()
+			now := time.Now()
+			c.conn.SetWriteDeadline(now.Add(writeWait))
 
-			err := c.conn.WriteMessage(websocket.TextMessage, event.EncodeOrPanic(
-				event.ExternalEvent{
-					Action:  event.Ping,
-					Payload: event.EncodeOrPanic(c.delay),
-				},
-			))
-			if err != nil {
-				log.Print(err)
+			c.pingTimestamp = now
+
+			if err := c.conn.WriteJSON(event.ExternalEvent{
+				Action:  event.Ping,
+				Payload: event.EncodeOrPanic(c.delay),
+			}); err != nil {
 				return
 			}
+
+			c.hasAnsweredPing = false
 		}
 	}
 }
@@ -132,8 +152,13 @@ helps determine an up-to-date network delay value, which will be subtracted from
 the player's clock to provide a fairer gameplay experience.
 */
 func (c *client) pongHandler() error {
-	c.delay = int(time.Since(c.pingTimestamp).Milliseconds())
-	return c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	// Handle pong events only when the client has a pending ping event.
+	if !c.hasAnsweredPing {
+		c.hasAnsweredPing = true
+		c.delay = int(time.Since(c.pingTimestamp).Milliseconds())
+		return c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	}
+	return nil
 }
 
 /*

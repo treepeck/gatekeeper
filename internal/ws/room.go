@@ -1,29 +1,47 @@
 package ws
 
-import "log"
+import (
+	"github.com/treepeck/gatekeeper/pkg/event"
+)
 
-type room struct {
-	timeControl int
-	timeBonus   int
-	subs        map[string]struct{}
+/*
+room describes the behavoiur of the arbitrary room.  The are two room types:
+hub and game.  The hub room will handle events differently, that's why the
+interface is used (to be able to store different structures in a single map).
+*/
+type room interface {
+	subscribe(id string, c *client)
+	unsubscribe(id string)
+	broadcast(e event.ExternalEvent)
 }
 
-func newRoom(timeControl int, timeBonus int) *room {
-	return &room{
-		timeControl: timeControl,
-		timeBonus:   timeBonus,
-		subs:        make(map[string]struct{}, 2),
+type hubRoom struct {
+	subs map[string]*client
+}
+
+func newHubRoom() *hubRoom {
+	return &hubRoom{
+		subs: make(map[string]*client, 0),
 	}
 }
 
-func (r *room) subscribe(id string) {
-	log.Printf("client \"%s\" subscribed to the room", id)
+/*
+subscribe adds a subscribtion record.  It is a caller's responsibility to ensure
+that the client isn't already subscribed.
+*/
+func (r *hubRoom) subscribe(id string, c *client) {
+	r.subs[id] = c
 }
 
-func (r *room) unsubscribe(id string) {
-	log.Printf("client \"%s\" unsubscribed from the room", id)
+/*
+unsubscribe removes a subscribtion record.
+*/
+func (r *hubRoom) unsubscribe(id string) {
+	delete(r.subs, id)
 }
 
-func (r *room) broadcast(raw []byte) {
-
+func (r *hubRoom) broadcast(e event.ExternalEvent) {
+	for _, c := range r.subs {
+		c.send <- e
+	}
 }
