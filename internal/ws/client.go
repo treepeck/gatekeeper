@@ -14,7 +14,7 @@ const (
 	// Time allowed to write a message to the peer.
 	writeWait = 10 * time.Second
 	// Time allowed to read the next pong message from the peer.
-	pongWait = 30 * time.Second
+	pongWait = 4 * time.Second
 	// Send pings to peer with this period. Must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
 	// Maximum message size allowed from peer.
@@ -33,7 +33,7 @@ type client struct {
 	conn    *websocket.Conn
 	// Connection delay.
 	delay         int
-	pingTimestamp int64
+	pingTimestamp time.Time
 }
 
 /*
@@ -46,12 +46,11 @@ func newClient(forward chan<- event.ExternalEvent, s *Server, conn *websocket.Co
 		send:          make(chan []byte, 192),
 		conn:          conn,
 		delay:         0,
-		pingTimestamp: time.Now().UnixMilli(),
+		pingTimestamp: time.Now(),
 	}
 
 	// Set connection parameters.
 	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetPongHandler(c.pongHandler)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 
 	return c
@@ -71,9 +70,13 @@ func (c *client) read(id string) {
 			return
 		}
 
-		e.ClientId = id
-
-		c.forward <- e
+		switch e.Action {
+		case event.Pong:
+			c.pongHandler()
+		default:
+			e.ClientId = id
+			c.forward <- e
+		}
 	}
 }
 
@@ -93,7 +96,7 @@ func (c *client) write() {
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			err := c.conn.WriteMessage(websocket.BinaryMessage, raw)
+			err := c.conn.WriteMessage(websocket.TextMessage, raw)
 			if err != nil {
 				return
 			}
@@ -102,9 +105,9 @@ func (c *client) write() {
 		case <-pingTicker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 
-			c.pingTimestamp = time.Now().UnixMilli()
+			c.pingTimestamp = time.Now()
 
-			err := c.conn.WriteMessage(websocket.PingMessage, event.EncodeOrPanic(
+			err := c.conn.WriteMessage(websocket.TextMessage, event.EncodeOrPanic(
 				event.ExternalEvent{
 					Action:  event.Ping,
 					Payload: event.EncodeOrPanic(c.delay),
@@ -123,9 +126,13 @@ pongHandler handles the incomming pong messages to maintain a heartbeat.
 
 Sending ping and pong messages is necessary because without it the connections
 are interrupted after about 2 minutes of no message sending from the client.
+
+Sets the delay value to the time elapsed since the last ping was sent.  This
+helps determine an up-to-date network delay value, which will be subtracted from
+the player's clock to provide a fairer gameplay experience.
 */
-func (c *client) pongHandler(appData string) error {
-	c.delay = int(time.Now().UnixMilli() - c.pingTimestamp)
+func (c *client) pongHandler() error {
+	c.delay = int(time.Since(c.pingTimestamp).Milliseconds())
 	return c.conn.SetReadDeadline(time.Now().Add(pongWait))
 }
 

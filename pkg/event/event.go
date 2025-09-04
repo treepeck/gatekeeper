@@ -10,6 +10,7 @@ type EventAction int
 const (
 	ClientsCounter EventAction = iota
 	Ping
+	Pong
 	Chat
 )
 
