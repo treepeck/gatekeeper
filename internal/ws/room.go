@@ -25,22 +25,42 @@ func newHubRoom() *hubRoom {
 	}
 }
 
-/*
-subscribe adds a subscribtion record.  It is a caller's responsibility to ensure
-that the client isn't already subscribed.
-*/
 func (r *hubRoom) subscribe(id string, c *client) {
 	r.subs[id] = c
 }
 
-/*
-unsubscribe removes a subscribtion record.
-*/
 func (r *hubRoom) unsubscribe(id string) {
 	delete(r.subs, id)
 }
 
 func (r *hubRoom) broadcast(e event.ExternalEvent) {
+	for _, c := range r.subs {
+		c.send <- e
+	}
+}
+
+/*
+gameRoom represents a single active game.
+*/
+type gameRoom struct {
+	subs map[string]*client
+}
+
+func newGameRoom() *gameRoom {
+	return &gameRoom{
+		subs: make(map[string]*client),
+	}
+}
+
+func (r *gameRoom) subscribe(id string, c *client) {
+	r.subs[id] = c
+}
+
+func (r *gameRoom) unsubscribe(id string) {
+	delete(r.subs, id)
+}
+
+func (r *gameRoom) broadcast(e event.ExternalEvent) {
 	for _, c := range r.subs {
 		c.send <- e
 	}

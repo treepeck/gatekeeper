@@ -19,7 +19,8 @@ var upgrader = websocket.Upgrader{
 }
 
 /*
-Handshake represents a single HTTP request.
+Handshake represents a single HTTP request.  ResponseChannel is used to ensure
+that requests are handled sequentially, not concurrently.
 */
 type Handshake struct {
 	Request         *http.Request

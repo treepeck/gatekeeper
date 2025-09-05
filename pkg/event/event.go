@@ -11,6 +11,11 @@ const (
 	ClientsCounter EventAction = iota
 	Ping
 	Pong
+	Move
+	AddRoom
+	EnterMatchmaking
+	Redirect
+	RemoveRoom
 	Chat
 )
 
@@ -25,6 +30,21 @@ type InternalEvent struct {
 	ClientId string          `json:"cid"`
 	RoomId   string          `json:"rid"`
 	Action   EventAction     `json:"a"`
+}
+
+/*
+Event payload types.
+*/
+
+type EnterMatchmakingPayload struct {
+	TimeControl int `json:"tc"`
+	TimeBonus   int `json:"tb"`
+}
+
+type AddRoomPayload struct {
+	Id      string `json:"id"`
+	WhiteId string `json:"wid"`
+	BlackId string `json:"bid"`
 }
 
 /*

@@ -2,35 +2,47 @@ package ws
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/treepeck/gatekeeper/pkg/event"
+	"github.com/treepeck/gatekeeper/pkg/mq"
+
+	"github.com/rabbitmq/amqp091-go"
 )
 
 type Server struct {
+	Channel       *amqp091.Channel
 	Register      chan Handshake
 	unregister    chan string
 	externalEvent chan event.ExternalEvent
+	InternalEvent chan event.InternalEvent
 	clients       map[string]*client
 	rooms         map[string]room
 }
 
-func NewServer() *Server {
+func NewServer(ch *amqp091.Channel) *Server {
 	rooms := make(map[string]room, 1)
 	rooms["hub"] = newHubRoom()
 
 	return &Server{
+		Channel:       ch,
 		Register:      make(chan Handshake),
 		unregister:    make(chan string),
 		externalEvent: make(chan event.ExternalEvent),
+		InternalEvent: make(chan event.InternalEvent),
 		clients:       make(map[string]*client),
 		rooms:         rooms,
 	}
 }
 
+/*
+Run recieves events from the [Server] channels and calls the corresponding
+handlers.
+*/
 func (s *Server) Run() {
 	for {
 		select {
@@ -42,10 +54,16 @@ func (s *Server) Run() {
 
 		case e := <-s.externalEvent:
 			s.handleExternalEvent(e)
+
+		case e := <-s.InternalEvent:
+			s.handleInternalEvent(e)
 		}
 	}
 }
 
+/*
+handleRegister handles the incomming WebSocket [Handshake] requests.
+*/
 func (s *Server) handleRegister(h Handshake) {
 	defer func() { h.ResponseChannel <- struct{}{} }()
 
@@ -110,6 +128,9 @@ func (s *Server) handleRegister(h Handshake) {
 	})
 }
 
+/*
+handleUnregister unregisters the client.
+*/
 func (s *Server) handleUnregister(id string) {
 	c, exists := s.clients[id]
 	if !exists {
@@ -133,10 +154,21 @@ func (s *Server) handleUnregister(id string) {
 	})
 }
 
+/*
+handleExternalEvent handles a [ExternalEvent] recieved from the connected client.
+*/
 func (s *Server) handleExternalEvent(e event.ExternalEvent) {
+	// Deny the request if the client is not registered.
 	c, exists := s.clients[e.ClientId]
 	if !exists {
 		log.Printf("client \"%s\" sent a message but is not registered", e.ClientId)
+		return
+	}
+
+	// Deny the request if the room does not exist.
+	r, exists := s.rooms[c.roomId]
+	if !exists {
+		log.Printf("room \"%s\" does not exist", c.roomId)
 		return
 	}
 
@@ -144,14 +176,50 @@ func (s *Server) handleExternalEvent(e event.ExternalEvent) {
 	// Chat messages are not passed to the core server since there is no point
 	// in doing so.
 	case event.Chat:
-		r, exists := s.rooms[c.roomId]
-		if !exists {
-			log.Printf("room \"%s\" does not exist", c.roomId)
-		}
-
 		r.broadcast(e)
 		return
-	}
 
-	log.Print(e)
+	default:
+		mq.Publish(s.Channel, "gate", event.EncodeOrPanic(event.InternalEvent{
+			Action:   e.Action,
+			Payload:  e.Payload,
+			ClientId: e.ClientId,
+			RoomId:   c.roomId,
+		}))
+	}
+}
+
+/*
+handleInternalEvent handles a [InternalEvent] recieved from the core server.
+*/
+func (s *Server) handleInternalEvent(e event.InternalEvent) {
+	switch e.Action {
+	// Clients will be automatically unsubscribed from the HUB room after
+	// redirect.
+	case event.AddRoom:
+		var p event.AddRoomPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			log.Printf("cannot decode AddRoomPayload: %s", err)
+			return
+		}
+
+		r := newGameRoom()
+		s.rooms[p.Id] = r
+
+		// Send redirect to the players.
+		redir := event.ExternalEvent{
+			Action:  event.Redirect,
+			Payload: event.EncodeOrPanic(p.Id),
+		}
+		s.clients[p.WhiteId].send <- redir
+		s.clients[p.BlackId].send <- redir
+
+	case event.RemoveRoom:
+		var roomId string
+		if err := json.Unmarshal(e.Payload, &roomId); err != nil {
+			log.Printf("cannot decode room id: %s", err)
+			return
+		}
+		delete(s.rooms, roomId)
+	}
 }

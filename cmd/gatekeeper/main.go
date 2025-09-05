@@ -49,10 +49,11 @@ func main() {
 	log.Printf("Successfully connected to RabbitMQ.")
 
 	log.Print("Starting server.")
-	s := ws.NewServer()
+	s := ws.NewServer(ch)
 
 	// Run the goroutines which will run untill the program exits.
 	go s.Run()
+	go mq.Consume(s.Channel, "core", s.InternalEvent)
 
 	// Handle incomming requests.
 	http.HandleFunc("GET /ws", func(rw http.ResponseWriter, r *http.Request) {

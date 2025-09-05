@@ -87,7 +87,7 @@ func (c *client) read(id string) {
 
 		switch e.Action {
 		case event.Pong:
-			c.pongHandler()
+			c.handlePong()
 		default:
 			e.ClientId = id
 			c.forward <- e
@@ -142,7 +142,7 @@ func (c *client) write() {
 }
 
 /*
-pongHandler handles the incomming pong messages to maintain a heartbeat.
+handlePong handles the incomming pong messages to maintain a heartbeat.
 
 Sending ping and pong messages is necessary because without it the connections
 are interrupted after about 2 minutes of no message sending from the client.
@@ -151,7 +151,7 @@ Sets the delay value to the time elapsed since the last ping was sent.  This
 helps determine an up-to-date network delay value, which will be subtracted from
 the player's clock to provide a fairer gameplay experience.
 */
-func (c *client) pongHandler() error {
+func (c *client) handlePong() error {
 	// Handle pong events only when the client has a pending ping event.
 	if !c.hasAnsweredPing {
 		c.hasAnsweredPing = true
