@@ -20,6 +20,13 @@ type ExternalEvent struct {
 	Action   EventAction     `json:"a"`
 }
 
+type InternalEvent struct {
+	Payload  json.RawMessage `json:"p"`
+	ClientId string          `json:"cid"`
+	RoomId   string          `json:"rid"`
+	Action   EventAction     `json:"a"`
+}
+
 /*
 EncodeOrPanic is a helper function to encode a JSON payload on the fly skipping
 the error check.  Panics if the error occurs.

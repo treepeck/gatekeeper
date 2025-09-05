@@ -7,6 +7,9 @@ import (
 
 	"github.com/treepeck/gatekeeper/internal/ws"
 	"github.com/treepeck/gatekeeper/pkg/env"
+	"github.com/treepeck/gatekeeper/pkg/mq"
+
+	"github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
@@ -18,35 +21,32 @@ func main() {
 	}
 	log.Print("Successfully loaded environment variables.")
 
-	/*
-		log.Print("Connecting to RabbitMQ.")
-		conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
-		if err != nil {
-			log.Panic(err)
-		}
-		defer conn.Close()
+	log.Print("Connecting to RabbitMQ.")
+	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
+	if err != nil {
+		log.Panic(err)
+	}
+	defer conn.Close()
 
+	// Open an AMQP channel.
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Panic(err)
+	}
+	defer ch.Close()
 
-		// Open an AMQP channel.
-		ch, err := conn.Channel()
-		if err != nil {
-			log.Panic(err)
-		}
-		defer ch.Close()
+	// Put the channel into a confirm mode.
+	err = ch.Confirm(false)
+	if err != nil {
+		log.Panic(err)
+	}
 
-		// Put the channel into a confirm mode.
-		err = ch.Confirm(false)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		// Declare the MQ topology.  See the doc/arch.png file.
-		err = mq.DeclareTopology(ch)
-		if err != nil {
-			log.Panic(err)
-		}
-		log.Printf("Successfully connected to RabbitMQ.")
-	*/
+	// Declare the MQ topology.  See the doc/arch.png file.
+	err = mq.DeclareTopology(ch)
+	if err != nil {
+		log.Panic(err)
+	}
+	log.Printf("Successfully connected to RabbitMQ.")
 
 	log.Print("Starting server.")
 	s := ws.NewServer()

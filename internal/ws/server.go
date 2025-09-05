@@ -103,6 +103,11 @@ func (s *Server) handleRegister(h Handshake) {
 	r.subscribe(playerId, c)
 
 	log.Printf("client \"%s\" registered to room \"%s\"", playerId, roomId)
+
+	s.rooms["hub"].broadcast(event.ExternalEvent{
+		Action:  event.ClientsCounter,
+		Payload: event.EncodeOrPanic(len(s.clients)),
+	})
 }
 
 func (s *Server) handleUnregister(id string) {
@@ -121,8 +126,32 @@ func (s *Server) handleUnregister(id string) {
 	}
 
 	log.Printf("client \"%s\" unregistered from room \"%s\"", id, c.roomId)
+
+	s.rooms["hub"].broadcast(event.ExternalEvent{
+		Action:  event.ClientsCounter,
+		Payload: event.EncodeOrPanic(len(s.clients)),
+	})
 }
 
 func (s *Server) handleExternalEvent(e event.ExternalEvent) {
+	c, exists := s.clients[e.ClientId]
+	if !exists {
+		log.Printf("client \"%s\" sent a message but is not registered", e.ClientId)
+		return
+	}
+
+	switch e.Action {
+	// Chat messages are not passed to the core server since there is no point
+	// in doing so.
+	case event.Chat:
+		r, exists := s.rooms[c.roomId]
+		if !exists {
+			log.Printf("room \"%s\" does not exist", c.roomId)
+		}
+
+		r.broadcast(e)
+		return
+	}
+
 	log.Print(e)
 }
