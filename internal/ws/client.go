@@ -1,8 +1,6 @@
 package ws
 
 import (
-	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/treepeck/gatekeeper/pkg/types"
@@ -34,7 +32,7 @@ type client struct {
 	roomId string
 	// server will handle the incomming client events.
 	server  *Server
-	forward chan<- types.ExternalEvent
+	forward chan<- types.Event
 	// send must recieve raw bytes to avoid expensive JSON encoding for each
 	// client.
 	send chan []byte
@@ -51,7 +49,7 @@ newClient creates a new client and sets the WebSocket connection properties.
 */
 func newClient(
 	roomId string,
-	forward chan<- types.ExternalEvent,
+	forward chan<- types.Event,
 	s *Server,
 	conn *websocket.Conn,
 ) *client {
@@ -82,20 +80,51 @@ forwards them to the gatekeeper.
 func (c *client) read(id string) {
 	defer c.cleanup(id)
 
-	var e types.ExternalEvent
+	var e types.Event
 	for {
 		err := c.conn.ReadJSON(&e)
 		if err != nil {
 			return
 		}
 
+		// Validate and add metadata before forwarding to the server.
 		switch e.Action {
 		case types.ActionPong:
 			c.handlePong()
-		default:
-			e.ClientId = id
-			c.forward <- e
+
+		case types.ActionChat:
+			p, ok := e.Payload.(types.Chat)
+			if !ok || c.roomId == "hub" {
+				goto malformed
+			}
+			p.ClientId = id
+			p.RoomId = c.roomId
+			c.forward <- types.Event{Action: e.Action, Payload: p}
+
+		case types.ActionMakeMove:
+			p, ok := e.Payload.(types.MakeMove)
+			if !ok || c.roomId == "hub" {
+				goto malformed
+			}
+			p.ClientId = id
+			p.RoomId = c.roomId
+			c.forward <- types.Event{Action: e.Action, Payload: p}
+
+		case types.ActionEnterMatchmaking:
+			p, ok := e.Payload.(types.EnterMatchmaking)
+			if !ok || c.roomId != "hub" {
+				goto malformed
+			}
+			// Forward event with metadata.
+			p.ClientId = id
+			c.forward <- types.Event{Action: e.Action, Payload: p}
 		}
+		continue
+
+	malformed:
+		// Close the connection if the client sent a malformed event.
+		c.send <- []byte("Server recieved a malformed message. The connection will be closed.")
+		return
 	}
 }
 
@@ -133,19 +162,12 @@ func (c *client) write() {
 
 			c.pingTimestamp = now
 
-			raw, err := json.Marshal(c.delay)
-			if err != nil {
-				log.Printf("cannot encode client's delay: %s", err)
-				return
-			}
-
-			if err := c.conn.WriteJSON(types.ExternalEvent{
+			if err := c.conn.WriteJSON(types.Event{
 				Action:  types.ActionPing,
-				Payload: raw,
+				Payload: c.delay,
 			}); err != nil {
 				return
 			}
-
 			c.hasAnsweredPing = false
 		}
 	}

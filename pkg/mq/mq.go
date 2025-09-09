@@ -57,7 +57,7 @@ will be forwarded to the handle channel.
 
 Panics if the queue cannot be consumed.
 */
-func Consume(ch *amqp091.Channel, name string, handle chan<- types.InternalEvent) {
+func Consume(ch *amqp091.Channel, name string, handle chan<- types.Event) {
 	events, err := ch.Consume(name, "", false, true, false, false, nil)
 	if err != nil {
 		log.Panicf("cannot consume queue \"%s\": %s", name, err)
@@ -68,7 +68,7 @@ func Consume(ch *amqp091.Channel, name string, handle chan<- types.InternalEvent
 
 	go func() {
 		for d := range events {
-			var e types.InternalEvent
+			var e types.Event
 			if err := json.Unmarshal(d.Body, &e); err != nil {
 				log.Printf("cannot unmarshal queue event: %s", err)
 				d.Nack(false, false)
@@ -88,7 +88,7 @@ func Consume(ch *amqp091.Channel, name string, handle chan<- types.InternalEvent
 
 /*
 Publish publishes an event to the queue with the specified name via the
-specified channel.  It waits up to 5 seconds for the event to be published;
+specified channel.  Waits up to 5 seconds for the event to be published;
 otherwise, an error is logged.
 */
 func Publish(ch *amqp091.Channel, name string, raw []byte) {

@@ -15,27 +15,25 @@ import (
 )
 
 type Server struct {
-	Channel       *amqp091.Channel
-	Register      chan Handshake
-	unregister    chan string
-	externalEvent chan types.ExternalEvent
-	InternalEvent chan types.InternalEvent
-	clients       map[string]*client
-	rooms         map[string]room
+	Channel    *amqp091.Channel
+	Register   chan Handshake
+	unregister chan string
+	EventBus   chan types.Event
+	clients    map[string]*client
+	rooms      map[string]*room
 }
 
 func NewServer(ch *amqp091.Channel) *Server {
-	rooms := make(map[string]room, 1)
-	rooms["hub"] = newHubRoom()
+	rooms := make(map[string]*room, 1)
+	rooms["hub"] = newRoom()
 
 	return &Server{
-		Channel:       ch,
-		Register:      make(chan Handshake),
-		unregister:    make(chan string),
-		externalEvent: make(chan types.ExternalEvent),
-		InternalEvent: make(chan types.InternalEvent),
-		clients:       make(map[string]*client),
-		rooms:         rooms,
+		Channel:    ch,
+		Register:   make(chan Handshake),
+		unregister: make(chan string),
+		EventBus:   make(chan types.Event),
+		clients:    make(map[string]*client),
+		rooms:      rooms,
 	}
 }
 
@@ -52,11 +50,8 @@ func (s *Server) Run() {
 		case id := <-s.unregister:
 			s.handleUnregister(id)
 
-		case e := <-s.externalEvent:
-			s.handleExternalEvent(e)
-
-		case e := <-s.InternalEvent:
-			s.handleInternalEvent(e)
+		case e := <-s.EventBus:
+			s.handleEvent(e)
 		}
 	}
 }
@@ -111,7 +106,7 @@ func (s *Server) handleRegister(h Handshake) {
 		return
 	}
 
-	c := newClient(roomId, s.externalEvent, s, conn)
+	c := newClient(roomId, s.EventBus, s, conn)
 
 	go c.read(playerId)
 	go c.write()
@@ -127,7 +122,7 @@ func (s *Server) handleRegister(h Handshake) {
 		log.Printf("cannot encode clients counter: %s", err)
 		return
 	}
-	s.rooms["hub"].broadcast(types.ExternalEvent{
+	s.rooms["hub"].broadcast(types.Event{
 		Action:  types.ActionClientsCounter,
 		Payload: raw,
 	})
@@ -158,101 +153,69 @@ func (s *Server) handleUnregister(id string) {
 		log.Printf("cannot encode clients counter: %s", err)
 		return
 	}
-	s.rooms["hub"].broadcast(types.ExternalEvent{
+	s.rooms["hub"].broadcast(types.Event{
 		Action:  types.ActionClientsCounter,
 		Payload: raw,
 	})
 }
 
 /*
-handleExternalEvent handles a [ExternalEvent] recieved from the connected client.
+handleEvent handles the incomming event.  It's a caller's responsibility to ensure
+that event has a valid payload and can be handled (the room exists).
 */
-func (s *Server) handleExternalEvent(e types.ExternalEvent) {
-	// Deny the request if the client is not registered.
-	c, exists := s.clients[e.ClientId]
-	if !exists {
-		log.Printf("client \"%s\" sent a message but is not registered", e.ClientId)
-		return
-	}
-
-	// Deny the request if the room does not exist.
-	r, exists := s.rooms[c.roomId]
-	if !exists {
-		log.Printf("room \"%s\" does not exist", c.roomId)
-		return
-	}
-
+func (s *Server) handleEvent(e types.Event) {
 	switch e.Action {
+	// Client events.
+
 	// Chat messages are not passed to the core server since there is no point
 	// in doing so.
 	case types.ActionChat:
-		r.broadcast(e)
-		return
+		p := e.Payload.(types.Chat)
+		if r, exists := s.rooms[p.RoomId]; exists {
+			r.broadcast(e)
+		}
 
-	default:
-		raw, err := json.Marshal(types.InternalEvent{
-			Action:   e.Action,
-			Payload:  e.Payload,
-			ClientId: e.ClientId,
-			RoomId:   c.roomId,
-		})
+	case types.ActionMakeMove:
+		p := e.Payload.(types.Chat)
+		if _, exists := s.rooms[p.RoomId]; exists {
+			raw, err := json.Marshal(e)
+			if err != nil {
+				log.Printf("cannot encode make move event: %s", err)
+				return
+			}
+			mq.Publish(s.Channel, "gate", raw)
+		}
+
+	case types.ActionEnterMatchmaking:
+		raw, err := json.Marshal(e)
 		if err != nil {
-			log.Printf("cannot encode internal event: %s", err)
+			log.Printf("cannot encode enter matchmaking event: %s", err)
 			return
 		}
 		mq.Publish(s.Channel, "gate", raw)
-	}
-}
 
-/*
-handleInternalEvent handles a [InternalEvent] recieved from the core server.
-*/
-func (s *Server) handleInternalEvent(e types.InternalEvent) {
-	switch e.Action {
-	// Clients will be automatically unsubscribed from the HUB room after
-	// redirect.
+	// Server events.
+
 	case types.ActionAddRoom:
-		var dto types.AddRoom
-		if err := json.Unmarshal(e.Payload, &dto); err != nil {
-			log.Printf("cannot decode AddRoomPayload: %s", err)
-			return
-		}
+		p := e.Payload.(types.AddRoom)
+		s.rooms[p.RoomId] = newRoom()
+		log.Printf("room \"%s\" added", p.RoomId)
 
-		r := newGameRoom()
-		s.rooms[dto.Id] = r
+		s.rooms["hub"].broadcast(e)
 
-		// Send redirect to the players.
-		raw, err := json.Marshal(types.ExternalEvent{
-			Action:  types.ActionRedirect,
-			Payload: []byte(dto.Id),
-		})
-		if err != nil {
-			log.Printf("cannot encode external event: %s", err)
-			return
+	case types.ActionGameInfo:
+		p := e.Payload.(types.GameInfo)
+		if r, exists := s.rooms[p.RoomId]; exists {
+			r.broadcast(e)
 		}
-		s.clients[dto.WhiteId].send <- raw
-		s.clients[dto.BlackId].send <- raw
-
-	case types.ActionRemoveRoom:
-		var roomId string
-		if err := json.Unmarshal(e.Payload, &roomId); err != nil {
-			log.Printf("cannot decode room id: %s", err)
-			return
-		}
-		delete(s.rooms, roomId)
 
 	case types.ActionCompletedMove:
-		raw, err := json.Marshal(types.ExternalEvent{
-			Action:  types.ActionCompletedMove,
-			Payload: e.Payload,
-		})
-		if err != nil {
-			log.Printf("cannot marshal external event: %s", err)
-			return
+		p := e.Payload.(types.CompletedMove)
+		if r, exists := s.rooms[p.RoomId]; exists {
+			r.broadcast(e)
 		}
 
-		for _, c := range s.clients {
-			c.send <- raw
-		}
+	default:
+		log.Print("recieved an event with incorrect type")
 	}
 }
