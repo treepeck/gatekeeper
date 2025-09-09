@@ -18,7 +18,7 @@ type Server struct {
 	Channel    *amqp091.Channel
 	Register   chan Handshake
 	unregister chan string
-	EventBus   chan types.Event
+	EventBus   chan types.MetaEvent
 	clients    map[string]*client
 	rooms      map[string]*room
 }
@@ -31,7 +31,7 @@ func NewServer(ch *amqp091.Channel) *Server {
 		Channel:    ch,
 		Register:   make(chan Handshake),
 		unregister: make(chan string),
-		EventBus:   make(chan types.Event),
+		EventBus:   make(chan types.MetaEvent),
 		clients:    make(map[string]*client),
 		rooms:      rooms,
 	}
@@ -117,14 +117,9 @@ func (s *Server) handleRegister(h Handshake) {
 
 	log.Printf("client \"%s\" registered to room \"%s\"", playerId, roomId)
 
-	raw, err = json.Marshal(len(s.clients))
-	if err != nil {
-		log.Printf("cannot encode clients counter: %s", err)
-		return
-	}
 	s.rooms["hub"].broadcast(types.Event{
 		Action:  types.ActionClientsCounter,
-		Payload: raw,
+		Payload: len(s.clients),
 	})
 }
 
@@ -148,14 +143,9 @@ func (s *Server) handleUnregister(id string) {
 
 	log.Printf("client \"%s\" unregistered from room \"%s\"", id, c.roomId)
 
-	raw, err := json.Marshal(len(s.clients))
-	if err != nil {
-		log.Printf("cannot encode clients counter: %s", err)
-		return
-	}
 	s.rooms["hub"].broadcast(types.Event{
 		Action:  types.ActionClientsCounter,
-		Payload: raw,
+		Payload: len(s.clients),
 	})
 }
 
@@ -163,21 +153,21 @@ func (s *Server) handleUnregister(id string) {
 handleEvent handles the incomming event.  It's a caller's responsibility to ensure
 that event has a valid payload and can be handled (the room exists).
 */
-func (s *Server) handleEvent(e types.Event) {
+func (s *Server) handleEvent(e types.MetaEvent) {
 	switch e.Action {
 	// Client events.
 
 	// Chat messages are not passed to the core server since there is no point
 	// in doing so.
 	case types.ActionChat:
-		p := e.Payload.(types.Chat)
-		if r, exists := s.rooms[p.RoomId]; exists {
-			r.broadcast(e)
+		p := e.Payload.(string)
+		if r, exists := s.rooms[e.RoomId]; exists {
+			r.broadcast(types.Event{Action: types.ActionChat, Payload: p})
 		}
 
 	case types.ActionMakeMove:
-		p := e.Payload.(types.Chat)
-		if _, exists := s.rooms[p.RoomId]; exists {
+		_, ok := e.Payload.(int)
+		if _, exists := s.rooms[e.RoomId]; exists && ok {
 			raw, err := json.Marshal(e)
 			if err != nil {
 				log.Printf("cannot encode make move event: %s", err)
@@ -198,21 +188,24 @@ func (s *Server) handleEvent(e types.Event) {
 
 	case types.ActionAddRoom:
 		p := e.Payload.(types.AddRoom)
-		s.rooms[p.RoomId] = newRoom()
-		log.Printf("room \"%s\" added", p.RoomId)
+		s.rooms[e.RoomId] = newRoom()
+		log.Printf("room \"%s\" added", e.RoomId)
 
-		s.rooms["hub"].broadcast(e)
+		s.rooms["hub"].broadcast(types.Event{
+			Action:  types.ActionAddRoom,
+			Payload: p,
+		})
 
 	case types.ActionGameInfo:
 		p := e.Payload.(types.GameInfo)
-		if r, exists := s.rooms[p.RoomId]; exists {
-			r.broadcast(e)
+		if r, exists := s.rooms[e.RoomId]; exists {
+			r.broadcast(types.Event{Action: e.Action, Payload: p})
 		}
 
 	case types.ActionCompletedMove:
 		p := e.Payload.(types.CompletedMove)
-		if r, exists := s.rooms[p.RoomId]; exists {
-			r.broadcast(e)
+		if r, exists := s.rooms[e.RoomId]; exists {
+			r.broadcast(types.Event{Action: e.Action, Payload: p})
 		}
 
 	default:

@@ -23,39 +23,44 @@ const (
 	ActionRemoveRoom
 )
 
+/*
+Event represents an arbitrary event without metadata, exchanged between the
+Gatekeeper and connected clients.
+*/
 type Event struct {
 	Action  EventAction `json:"a"`
 	Payload any         `json:"p"`
 }
 
+/*
+MetaEvent represents an event with additional metadata used to route, validate,
+and handle it.  Clients never interact with MetaEvents directly; they are only
+exchanged between the Gatekeeper and the core server.
+*/
+type MetaEvent struct {
+	RoomId   string      `json:"rid"`
+	ClientId string      `json:"cid"`
+	Action   EventAction `json:"a"`
+	Payload  any         `json:"p"`
+}
+
+/*
+Event payload types.
+*/
+
 type EnterMatchmaking struct {
-	ClientId    string `json:"cid"`
-	TimeControl int    `json:"tc"`
-	TimeBonus   int    `json:"tb"`
+	TimeControl int `json:"tc"`
+	TimeBonus   int `json:"tb"`
 }
 
 type AddRoom struct {
-	RoomId  string `json:"rid"`
 	WhiteId string `json:"wid"`
 	BlackId string `json:"bid"`
 }
 
-type MakeMove struct {
-	ClientId string `json:"cid"`
-	RoomId   string `json:"rid"`
-	Move     int    `json:"m"`
-}
-
-type Chat struct {
-	ClientId string `json:"cid"`
-	RoomId   string `json:"rid"`
-	Message  string `json:"msg"`
-}
-
 type CompletedMove struct {
 	// Legal moves for the next turn.
-	LegalMoves []int  `json:"lm"`
-	RoomId     string `json:"rid"`
+	LegalMoves []int `json:"lm"`
 	// Completed move in Standard Algebraic Notation.
 	San string `json:"san"`
 	// Board state in Forsyth-Edwards Notation.
@@ -69,7 +74,6 @@ GameInfo represents information the clients will recieve after connecting
 to the room.
 */
 type GameInfo struct {
-	RoomId      string `json:"rid"`
 	WhiteId     string `json:"wid"`
 	BlackId     string `json:"bid"`
 	TimeControl int    `json:"tc"`

@@ -32,7 +32,7 @@ type client struct {
 	roomId string
 	// server will handle the incomming client events.
 	server  *Server
-	forward chan<- types.Event
+	forward chan<- types.MetaEvent
 	// send must recieve raw bytes to avoid expensive JSON encoding for each
 	// client.
 	send chan []byte
@@ -49,7 +49,7 @@ newClient creates a new client and sets the WebSocket connection properties.
 */
 func newClient(
 	roomId string,
-	forward chan<- types.Event,
+	forward chan<- types.MetaEvent,
 	s *Server,
 	conn *websocket.Conn,
 ) *client {
@@ -93,31 +93,37 @@ func (c *client) read(id string) {
 			c.handlePong()
 
 		case types.ActionChat:
-			p, ok := e.Payload.(types.Chat)
+			p, ok := e.Payload.(string)
 			if !ok || c.roomId == "hub" {
 				goto malformed
 			}
-			p.ClientId = id
-			p.RoomId = c.roomId
-			c.forward <- types.Event{Action: e.Action, Payload: p}
+
+			c.forward <- types.MetaEvent{ClientId: id,
+				RoomId:  c.roomId,
+				Action:  e.Action,
+				Payload: p}
 
 		case types.ActionMakeMove:
-			p, ok := e.Payload.(types.MakeMove)
+			p, ok := e.Payload.(int)
 			if !ok || c.roomId == "hub" {
 				goto malformed
 			}
-			p.ClientId = id
-			p.RoomId = c.roomId
-			c.forward <- types.Event{Action: e.Action, Payload: p}
+
+			c.forward <- types.MetaEvent{ClientId: id,
+				RoomId:  c.roomId,
+				Action:  e.Action,
+				Payload: p}
 
 		case types.ActionEnterMatchmaking:
 			p, ok := e.Payload.(types.EnterMatchmaking)
 			if !ok || c.roomId != "hub" {
 				goto malformed
 			}
-			// Forward event with metadata.
-			p.ClientId = id
-			c.forward <- types.Event{Action: e.Action, Payload: p}
+
+			c.forward <- types.MetaEvent{ClientId: id,
+				RoomId:  c.roomId,
+				Action:  e.Action,
+				Payload: p}
 		}
 		continue
 
