@@ -1,9 +1,11 @@
 package ws
 
 import (
+	"encoding/json"
+	"log"
 	"time"
 
-	"github.com/treepeck/gatekeeper/pkg/event"
+	"github.com/treepeck/gatekeeper/pkg/types"
 
 	"github.com/gorilla/websocket"
 )
@@ -32,9 +34,11 @@ type client struct {
 	roomId string
 	// server will handle the incomming client events.
 	server  *Server
-	forward chan<- event.ExternalEvent
-	send    chan event.ExternalEvent
-	conn    *websocket.Conn
+	forward chan<- types.ExternalEvent
+	// send must recieve raw bytes to avoid expensive JSON encoding for each
+	// client.
+	send chan []byte
+	conn *websocket.Conn
 	// Network delay.
 	delay int
 	// New ping event must be sent only when the client responses to the
@@ -47,7 +51,7 @@ newClient creates a new client and sets the WebSocket connection properties.
 */
 func newClient(
 	roomId string,
-	forward chan<- event.ExternalEvent,
+	forward chan<- types.ExternalEvent,
 	s *Server,
 	conn *websocket.Conn,
 ) *client {
@@ -57,7 +61,7 @@ func newClient(
 		server:        s,
 		roomId:        roomId,
 		forward:       forward,
-		send:          make(chan event.ExternalEvent, 192),
+		send:          make(chan []byte, 192),
 		conn:          conn,
 		delay:         0,
 		pingTimestamp: now,
@@ -78,7 +82,7 @@ forwards them to the gatekeeper.
 func (c *client) read(id string) {
 	defer c.cleanup(id)
 
-	var e event.ExternalEvent
+	var e types.ExternalEvent
 	for {
 		err := c.conn.ReadJSON(&e)
 		if err != nil {
@@ -86,7 +90,7 @@ func (c *client) read(id string) {
 		}
 
 		switch e.Action {
-		case event.Pong:
+		case types.ActionPong:
 			c.handlePong()
 		default:
 			e.ClientId = id
@@ -105,14 +109,14 @@ func (c *client) write() {
 
 	for {
 		select {
-		case e, ok := <-c.send:
+		case raw, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
-			if err := c.conn.WriteJSON(e); err != nil {
+			if err := c.conn.WriteMessage(websocket.TextMessage, raw); err != nil {
 				return
 			}
 
@@ -129,9 +133,15 @@ func (c *client) write() {
 
 			c.pingTimestamp = now
 
-			if err := c.conn.WriteJSON(event.ExternalEvent{
-				Action:  event.Ping,
-				Payload: event.EncodeOrPanic(c.delay),
+			raw, err := json.Marshal(c.delay)
+			if err != nil {
+				log.Printf("cannot encode client's delay: %s", err)
+				return
+			}
+
+			if err := c.conn.WriteJSON(types.ExternalEvent{
+				Action:  types.ActionPing,
+				Payload: raw,
 			}); err != nil {
 				return
 			}

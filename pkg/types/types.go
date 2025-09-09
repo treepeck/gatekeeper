@@ -1,8 +1,7 @@
-package event
+package types
 
 import (
 	"encoding/json"
-	"log"
 )
 
 /*
@@ -12,20 +11,20 @@ type EventAction int
 
 const (
 	// Events that can be sent by both Gatekeeper and core server.
-	Ping EventAction = iota
-	GameInfo
-	Redirect
-	CompletedMove
-	ClientsCounter
+	ActionPing EventAction = iota
+	ActionGameInfo
+	ActionRedirect
+	ActionCompletedMove
+	ActionClientsCounter
 	// Events that can be sent only by the clients.
-	Pong
-	MakeMove
-	EnterMatchmaking
+	ActionPong
+	ActionMakeMove
+	ActionEnterMatchmaking
 	// Events that can be sent by both Gatekeeper and clients.
-	Chat
+	ActionChat
 	// Events that can be sent only by the core server.
-	AddRoom
-	RemoveRoom
+	ActionAddRoom
+	ActionRemoveRoom
 )
 
 /*
@@ -50,14 +49,10 @@ type InternalEvent struct {
 }
 
 /*
-Event payload types.
-*/
-
-/*
-GameInfoPayload represents information the clients will recieve after connecting
+GameInfo represents information the clients will recieve after connecting
 to the room.
 */
-type GameInfoPayload struct {
+type GameInfo struct {
 	WhiteId     string `json:"wid"`
 	BlackId     string `json:"bid"`
 	TimeControl int    `json:"tc"`
@@ -65,10 +60,10 @@ type GameInfoPayload struct {
 }
 
 /*
-CompletedMovePayload represents information the clients will recieve after each
+CompletedMove represents information the clients will recieve after each
 completed move.
 */
-type CompletedMovePayload struct {
+type CompletedMove struct {
 	// Legal moves for the next turn.
 	LegalMoves []int `json:"lm"`
 	// Completed move in Standard Algebraic Notation.
@@ -79,25 +74,16 @@ type CompletedMovePayload struct {
 	TimeLeft int `json:"tl"`
 }
 
-type EnterMatchmakingPayload struct {
-	TimeControl int `json:"tc"`
-	TimeBonus   int `json:"tb"`
-}
-
-type AddRoomPayload struct {
+/*
+AddRoom represents the payload of the ActionAddRoom event.
+*/
+type AddRoom struct {
 	Id      string `json:"id"`
 	WhiteId string `json:"wid"`
 	BlackId string `json:"bid"`
 }
 
-/*
-EncodeOrPanic is a helper function to encode a JSON payload on the fly skipping
-the error check.  Panics if the error occurs.
-*/
-func EncodeOrPanic(v any) []byte {
-	p, err := json.Marshal(v)
-	if err != nil {
-		log.Panicf("cannot encode payload %v: %s", v, err)
-	}
-	return p
+type RoomParams struct {
+	TimeControl int `json:"tc"`
+	TimeBonus   int `json:"tb"`
 }

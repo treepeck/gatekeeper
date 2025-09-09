@@ -1,7 +1,10 @@
 package ws
 
 import (
-	"github.com/treepeck/gatekeeper/pkg/event"
+	"encoding/json"
+	"log"
+
+	"github.com/treepeck/gatekeeper/pkg/types"
 )
 
 /*
@@ -12,7 +15,7 @@ interface is used (to be able to store different structures in a single map).
 type room interface {
 	subscribe(id string, c *client)
 	unsubscribe(id string)
-	broadcast(e event.ExternalEvent)
+	broadcast(e types.ExternalEvent)
 }
 
 type hubRoom struct {
@@ -33,9 +36,15 @@ func (r *hubRoom) unsubscribe(id string) {
 	delete(r.subs, id)
 }
 
-func (r *hubRoom) broadcast(e event.ExternalEvent) {
+func (r *hubRoom) broadcast(e types.ExternalEvent) {
+	raw, err := json.Marshal(e)
+	if err != nil {
+		log.Printf("cannot encode external event: %s", err)
+		return
+	}
+
 	for _, c := range r.subs {
-		c.send <- e
+		c.send <- raw
 	}
 }
 
@@ -60,8 +69,14 @@ func (r *gameRoom) unsubscribe(id string) {
 	delete(r.subs, id)
 }
 
-func (r *gameRoom) broadcast(e event.ExternalEvent) {
+func (r *gameRoom) broadcast(e types.ExternalEvent) {
+	raw, err := json.Marshal(e)
+	if err != nil {
+		log.Printf("cannot encode external event: %s", err)
+		return
+	}
+
 	for _, c := range r.subs {
-		c.send <- e
+		c.send <- raw
 	}
 }

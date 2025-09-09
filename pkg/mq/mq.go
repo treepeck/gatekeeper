@@ -11,7 +11,7 @@ import (
 
 	"github.com/rabbitmq/amqp091-go"
 
-	"github.com/treepeck/gatekeeper/pkg/event"
+	"github.com/treepeck/gatekeeper/pkg/types"
 )
 
 /*
@@ -57,7 +57,7 @@ will be forwarded to the handle channel.
 
 Panics if the queue cannot be consumed.
 */
-func Consume(ch *amqp091.Channel, name string, handle chan<- event.InternalEvent) {
+func Consume(ch *amqp091.Channel, name string, handle chan<- types.InternalEvent) {
 	events, err := ch.Consume(name, "", false, true, false, false, nil)
 	if err != nil {
 		log.Panicf("cannot consume queue \"%s\": %s", name, err)
@@ -68,7 +68,7 @@ func Consume(ch *amqp091.Channel, name string, handle chan<- event.InternalEvent
 
 	go func() {
 		for d := range events {
-			var e event.InternalEvent
+			var e types.InternalEvent
 			if err := json.Unmarshal(d.Body, &e); err != nil {
 				log.Printf("cannot unmarshal queue event: %s", err)
 				d.Nack(false, false)

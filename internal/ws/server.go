@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/treepeck/gatekeeper/pkg/event"
 	"github.com/treepeck/gatekeeper/pkg/mq"
+	"github.com/treepeck/gatekeeper/pkg/types"
 
 	"github.com/rabbitmq/amqp091-go"
 )
@@ -18,8 +18,8 @@ type Server struct {
 	Channel       *amqp091.Channel
 	Register      chan Handshake
 	unregister    chan string
-	externalEvent chan event.ExternalEvent
-	InternalEvent chan event.InternalEvent
+	externalEvent chan types.ExternalEvent
+	InternalEvent chan types.InternalEvent
 	clients       map[string]*client
 	rooms         map[string]room
 }
@@ -32,8 +32,8 @@ func NewServer(ch *amqp091.Channel) *Server {
 		Channel:       ch,
 		Register:      make(chan Handshake),
 		unregister:    make(chan string),
-		externalEvent: make(chan event.ExternalEvent),
-		InternalEvent: make(chan event.InternalEvent),
+		externalEvent: make(chan types.ExternalEvent),
+		InternalEvent: make(chan types.InternalEvent),
 		clients:       make(map[string]*client),
 		rooms:         rooms,
 	}
@@ -122,9 +122,14 @@ func (s *Server) handleRegister(h Handshake) {
 
 	log.Printf("client \"%s\" registered to room \"%s\"", playerId, roomId)
 
-	s.rooms["hub"].broadcast(event.ExternalEvent{
-		Action:  event.ClientsCounter,
-		Payload: event.EncodeOrPanic(len(s.clients)),
+	raw, err = json.Marshal(len(s.clients))
+	if err != nil {
+		log.Printf("cannot encode clients counter: %s", err)
+		return
+	}
+	s.rooms["hub"].broadcast(types.ExternalEvent{
+		Action:  types.ActionClientsCounter,
+		Payload: raw,
 	})
 }
 
@@ -148,16 +153,21 @@ func (s *Server) handleUnregister(id string) {
 
 	log.Printf("client \"%s\" unregistered from room \"%s\"", id, c.roomId)
 
-	s.rooms["hub"].broadcast(event.ExternalEvent{
-		Action:  event.ClientsCounter,
-		Payload: event.EncodeOrPanic(len(s.clients)),
+	raw, err := json.Marshal(len(s.clients))
+	if err != nil {
+		log.Printf("cannot encode clients counter: %s", err)
+		return
+	}
+	s.rooms["hub"].broadcast(types.ExternalEvent{
+		Action:  types.ActionClientsCounter,
+		Payload: raw,
 	})
 }
 
 /*
 handleExternalEvent handles a [ExternalEvent] recieved from the connected client.
 */
-func (s *Server) handleExternalEvent(e event.ExternalEvent) {
+func (s *Server) handleExternalEvent(e types.ExternalEvent) {
 	// Deny the request if the client is not registered.
 	c, exists := s.clients[e.ClientId]
 	if !exists {
@@ -175,51 +185,74 @@ func (s *Server) handleExternalEvent(e event.ExternalEvent) {
 	switch e.Action {
 	// Chat messages are not passed to the core server since there is no point
 	// in doing so.
-	case event.Chat:
+	case types.ActionChat:
 		r.broadcast(e)
 		return
 
 	default:
-		mq.Publish(s.Channel, "gate", event.EncodeOrPanic(event.InternalEvent{
+		raw, err := json.Marshal(types.InternalEvent{
 			Action:   e.Action,
 			Payload:  e.Payload,
 			ClientId: e.ClientId,
 			RoomId:   c.roomId,
-		}))
+		})
+		if err != nil {
+			log.Printf("cannot encode internal event: %s", err)
+			return
+		}
+		mq.Publish(s.Channel, "gate", raw)
 	}
 }
 
 /*
 handleInternalEvent handles a [InternalEvent] recieved from the core server.
 */
-func (s *Server) handleInternalEvent(e event.InternalEvent) {
+func (s *Server) handleInternalEvent(e types.InternalEvent) {
 	switch e.Action {
 	// Clients will be automatically unsubscribed from the HUB room after
 	// redirect.
-	case event.AddRoom:
-		var p event.AddRoomPayload
-		if err := json.Unmarshal(e.Payload, &p); err != nil {
+	case types.ActionAddRoom:
+		var dto types.AddRoom
+		if err := json.Unmarshal(e.Payload, &dto); err != nil {
 			log.Printf("cannot decode AddRoomPayload: %s", err)
 			return
 		}
 
 		r := newGameRoom()
-		s.rooms[p.Id] = r
+		s.rooms[dto.Id] = r
 
 		// Send redirect to the players.
-		redir := event.ExternalEvent{
-			Action:  event.Redirect,
-			Payload: event.EncodeOrPanic(p.Id),
+		raw, err := json.Marshal(types.ExternalEvent{
+			Action:  types.ActionRedirect,
+			Payload: []byte(dto.Id),
+		})
+		if err != nil {
+			log.Printf("cannot encode external event: %s", err)
+			return
 		}
-		s.clients[p.WhiteId].send <- redir
-		s.clients[p.BlackId].send <- redir
+		s.clients[dto.WhiteId].send <- raw
+		s.clients[dto.BlackId].send <- raw
 
-	case event.RemoveRoom:
+	case types.ActionRemoveRoom:
 		var roomId string
 		if err := json.Unmarshal(e.Payload, &roomId); err != nil {
 			log.Printf("cannot decode room id: %s", err)
 			return
 		}
 		delete(s.rooms, roomId)
+
+	case types.ActionCompletedMove:
+		raw, err := json.Marshal(types.ExternalEvent{
+			Action:  types.ActionCompletedMove,
+			Payload: e.Payload,
+		})
+		if err != nil {
+			log.Printf("cannot marshal external event: %s", err)
+			return
+		}
+
+		for _, c := range s.clients {
+			c.send <- raw
+		}
 	}
 }
