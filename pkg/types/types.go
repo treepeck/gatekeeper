@@ -14,6 +14,9 @@ const (
 	ActionRedirect
 	ActionCompletedMove
 	ActionClientsCounter
+	// Events that can be send only by the Gatekeeper
+	ActionJoinRoom
+	ActionLeaveRoom
 	// Events that can be sent only by the clients.
 	ActionPong
 	ActionMakeMove

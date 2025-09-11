@@ -122,6 +122,22 @@ func (s *Server) handleRegister(h Handshake) {
 		Action:  types.ActionClientsCounter,
 		Payload: []byte(strconv.Itoa(len(s.clients))),
 	})
+
+	// Notify the core server that the client has connected to the game room.
+	if c.roomId != "hub" {
+		raw, err := json.Marshal(types.MetaEvent{
+			Action:   types.ActionLeaveRoom,
+			ClientId: playerId,
+			RoomId:   c.roomId,
+			Payload:  []byte{},
+		})
+		if err != nil {
+			log.Printf("cannot encode leave room event: %s", err)
+			return
+		}
+
+		mq.Publish(s.Channel, "gate", raw)
+	}
 }
 
 /*
@@ -148,6 +164,23 @@ func (s *Server) handleUnregister(id string) {
 		Action:  types.ActionClientsCounter,
 		Payload: []byte(strconv.Itoa(len(s.clients))),
 	})
+
+	// Notify the core server that the client has disconnected from the game
+	// room.
+	if c.roomId != "hub" {
+		raw, err := json.Marshal(types.MetaEvent{
+			Action:   types.ActionLeaveRoom,
+			ClientId: id,
+			RoomId:   c.roomId,
+			Payload:  []byte{},
+		})
+		if err != nil {
+			log.Printf("cannot encode leave room event: %s", err)
+			return
+		}
+
+		mq.Publish(s.Channel, "gate", raw)
+	}
 }
 
 /*
