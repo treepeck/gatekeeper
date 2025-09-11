@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/treepeck/gatekeeper/pkg/mq"
 	"github.com/treepeck/gatekeeper/pkg/types"
@@ -119,7 +120,7 @@ func (s *Server) handleRegister(h Handshake) {
 
 	s.rooms["hub"].broadcast(types.Event{
 		Action:  types.ActionClientsCounter,
-		Payload: len(s.clients),
+		Payload: []byte(strconv.Itoa(len(s.clients))),
 	})
 }
 
@@ -145,7 +146,7 @@ func (s *Server) handleUnregister(id string) {
 
 	s.rooms["hub"].broadcast(types.Event{
 		Action:  types.ActionClientsCounter,
-		Payload: len(s.clients),
+		Payload: []byte(strconv.Itoa(len(s.clients))),
 	})
 }
 
@@ -160,14 +161,12 @@ func (s *Server) handleEvent(e types.MetaEvent) {
 	// Chat messages are not passed to the core server since there is no point
 	// in doing so.
 	case types.ActionChat:
-		p := e.Payload.(string)
 		if r, exists := s.rooms[e.RoomId]; exists {
-			r.broadcast(types.Event{Action: types.ActionChat, Payload: p})
+			r.broadcast(types.Event{Action: types.ActionChat, Payload: e.Payload})
 		}
 
 	case types.ActionMakeMove:
-		_, ok := e.Payload.(int)
-		if _, exists := s.rooms[e.RoomId]; exists && ok {
+		if _, exists := s.rooms[e.RoomId]; exists {
 			raw, err := json.Marshal(e)
 			if err != nil {
 				log.Printf("cannot encode make move event: %s", err)
@@ -187,25 +186,22 @@ func (s *Server) handleEvent(e types.MetaEvent) {
 	// Server events.
 
 	case types.ActionAddRoom:
-		p := e.Payload.(types.AddRoom)
 		s.rooms[e.RoomId] = newRoom()
 		log.Printf("room \"%s\" added", e.RoomId)
 
 		s.rooms["hub"].broadcast(types.Event{
 			Action:  types.ActionAddRoom,
-			Payload: p,
+			Payload: e.Payload,
 		})
 
 	case types.ActionGameInfo:
-		p := e.Payload.(types.GameInfo)
 		if r, exists := s.rooms[e.RoomId]; exists {
-			r.broadcast(types.Event{Action: e.Action, Payload: p})
+			r.broadcast(types.Event{Action: e.Action, Payload: e.Payload})
 		}
 
 	case types.ActionCompletedMove:
-		p := e.Payload.(types.CompletedMove)
 		if r, exists := s.rooms[e.RoomId]; exists {
-			r.broadcast(types.Event{Action: e.Action, Payload: p})
+			r.broadcast(types.Event{Action: e.Action, Payload: e.Payload})
 		}
 
 	default:

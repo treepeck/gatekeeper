@@ -1,6 +1,8 @@
 package ws
 
 import (
+	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/treepeck/gatekeeper/pkg/types"
@@ -82,55 +84,33 @@ func (c *client) read(id string) {
 
 	var e types.Event
 	for {
-		err := c.conn.ReadJSON(&e)
-		if err != nil {
+		if err := c.conn.ReadJSON(&e); err != nil {
 			return
 		}
 
-		// Validate and add metadata before forwarding to the server.
 		switch e.Action {
-		case types.ActionPong:
+		case types.ActionPing:
 			c.handlePong()
 
 		case types.ActionChat:
-			p, ok := e.Payload.(string)
-			if !ok || c.roomId == "hub" {
-				goto malformed
-			}
-
-			c.forward <- types.MetaEvent{ClientId: id,
-				RoomId:  c.roomId,
-				Action:  e.Action,
-				Payload: p}
-
+			fallthrough
 		case types.ActionMakeMove:
-			p, ok := e.Payload.(int)
-			if !ok || c.roomId == "hub" {
-				goto malformed
+			if c.roomId == "hub" {
+				return
 			}
-
-			c.forward <- types.MetaEvent{ClientId: id,
-				RoomId:  c.roomId,
-				Action:  e.Action,
-				Payload: p}
 
 		case types.ActionEnterMatchmaking:
-			p, ok := e.Payload.(types.EnterMatchmaking)
-			if !ok || c.roomId != "hub" {
-				goto malformed
+			if c.roomId != "hub" {
+				return
 			}
-
-			c.forward <- types.MetaEvent{ClientId: id,
-				RoomId:  c.roomId,
-				Action:  e.Action,
-				Payload: p}
 		}
-		continue
 
-	malformed:
-		// Close the connection if the client sent a malformed event.
-		c.send <- []byte("Server recieved a malformed message. The connection will be closed.")
-		return
+		c.forward <- types.MetaEvent{
+			ClientId: id,
+			RoomId:   c.roomId,
+			Action:   e.Action,
+			Payload:  e.Payload,
+		}
 	}
 }
 
@@ -170,7 +150,7 @@ func (c *client) write() {
 
 			if err := c.conn.WriteJSON(types.Event{
 				Action:  types.ActionPing,
-				Payload: c.delay,
+				Payload: json.RawMessage(strconv.Itoa(c.delay)),
 			}); err != nil {
 				return
 			}

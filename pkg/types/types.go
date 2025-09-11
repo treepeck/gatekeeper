@@ -1,5 +1,7 @@
 package types
 
+import "encoding/json"
+
 /*
 EventAction represents a domain of possible event actions.
 */
@@ -28,8 +30,8 @@ Event represents an arbitrary event without metadata, exchanged between the
 Gatekeeper and connected clients.
 */
 type Event struct {
-	Action  EventAction `json:"a"`
-	Payload any         `json:"p"`
+	Action  EventAction     `json:"a"`
+	Payload json.RawMessage `json:"p"`
 }
 
 /*
@@ -38,10 +40,10 @@ and handle it.  Clients never interact with MetaEvents directly; they are only
 exchanged between the Gatekeeper and the core server.
 */
 type MetaEvent struct {
-	RoomId   string      `json:"rid"`
-	ClientId string      `json:"cid"`
-	Action   EventAction `json:"a"`
-	Payload  any         `json:"p"`
+	RoomId   string          `json:"rid"`
+	ClientId string          `json:"cid"`
+	Payload  json.RawMessage `json:"p"`
+	Action   EventAction     `json:"a"`
 }
 
 /*
