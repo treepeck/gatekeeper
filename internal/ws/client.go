@@ -27,17 +27,21 @@ client wraps a single connection and provides methods for reading, writing and
 handling WebSocket messages.
 */
 type client struct {
-	// Timestamp when the last ping event was sent to measure response delay.
+	// Timestamp when the last ping event was sent to measure the response delay.
 	pingTimestamp time.Time
 	id            string
 	// Id of the room to which the client is subscribed.  Multiple subscribtions
 	// from a single client are prohibited.
 	roomId string
-	// server will handle the incomming client events.
-	server  *Server
+	// unregister is a channel which will notify the server about client
+	// disconnection.
+	unregister chan<- string
+	// forward is a channel which will recieve and handle the incomming client
+	// events.
 	forward chan<- types.MetaEvent
-	// send must recieve raw bytes to avoid expensive JSON encoding for each
-	// client.
+	// send is a channel which recieves events that the client will write to
+	// the WebSocket connection.  It must recieve raw bytes to avoid expensive
+	// JSON encoding for each client in case of event broadcasting.
 	send chan []byte
 	conn *websocket.Conn
 	// Network delay.
@@ -52,22 +56,22 @@ newClient creates a new client and sets the WebSocket connection properties.
 */
 func newClient(
 	id, roomId string,
+	unregister chan<- string,
 	forward chan<- types.MetaEvent,
-	s *Server,
 	conn *websocket.Conn,
 ) *client {
 	now := time.Now()
 
 	c := &client{
-		server:        s,
 		id:            id,
 		roomId:        roomId,
+		unregister:    unregister,
 		forward:       forward,
 		send:          make(chan []byte, 192),
 		conn:          conn,
 		delay:         0,
 		pingTimestamp: now,
-		// Must be true to be able to send a first ping message.
+		// Must be true to be able to send the first ping message.
 		hasAnsweredPing: true,
 	}
 
@@ -78,7 +82,7 @@ func newClient(
 }
 
 /*
-read consequentially (one at a time) reads messages from the connection and
+read consequentially (one at a time) reads events from the connection and
 forwards them to the gatekeeper.
 */
 func (c *client) read() {
@@ -94,31 +98,29 @@ func (c *client) read() {
 		case types.ActionPing:
 			c.handlePong()
 
+		// Forward client events with metadata.
+		case types.ActionMakeMove:
+			fallthrough
 		case types.ActionChat:
 			fallthrough
-		case types.ActionMakeMove:
-			if c.roomId == "hub" {
-				return
-			}
-
 		case types.ActionEnterMatchmaking:
-			if c.roomId != "hub" {
-				return
+			c.forward <- types.MetaEvent{
+				ClientId: c.id,
+				RoomId:   c.roomId,
+				Action:   e.Action,
+				Payload:  e.Payload,
 			}
-		}
 
-		c.forward <- types.MetaEvent{
-			ClientId: c.id,
-			RoomId:   c.roomId,
-			Action:   e.Action,
-			Payload:  e.Payload,
+		// Close the connection if the client sends the malformed event.
+		default:
+			return
 		}
 	}
 }
 
 /*
-write consequentially (one at a time) writes messages to the connection.
-Automatically sends ping messages to maintain a hearbeat.
+write consequentially (one at a time) writes events to the connection.
+Automatically sends ping events to maintain a hearbeat.
 */
 func (c *client) write() {
 	pingTicker := time.NewTicker(pingPeriod)
@@ -187,5 +189,5 @@ cleanup closes the connection and unregisters the client from the gatekeeper.
 func (c *client) cleanup() {
 	close(c.send)
 	c.conn.Close()
-	c.server.unregister <- c.id
+	c.unregister <- c.id
 }

@@ -7,6 +7,9 @@ import (
 	"github.com/treepeck/gatekeeper/pkg/types"
 )
 
+/*
+room stores the collection of subscribers and broadcasts events among them.
+*/
 type room struct {
 	subs map[string]*client
 }
@@ -25,6 +28,9 @@ func (r *room) unsubscribe(id string) {
 	delete(r.subs, id)
 }
 
+/*
+broadcast encodes the specified event and sends it to all subscribed clients.
+*/
 func (r *room) broadcast(e types.Event) {
 	raw, err := json.Marshal(e)
 	if err != nil {

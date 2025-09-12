@@ -15,6 +15,14 @@ import (
 	"github.com/rabbitmq/amqp091-go"
 )
 
+/*
+Server is responsible for handling incoming events from both connected
+clients and the core server.
+
+Communication with the core server is done via an AMQP (RabbitMQ) channel, where
+the server publishes client events.  It also consumes the core queue, where the
+core server publishes responses.
+*/
 type Server struct {
 	Channel    *amqp091.Channel
 	Register   chan Handshake
@@ -39,8 +47,8 @@ func NewServer(ch *amqp091.Channel) *Server {
 }
 
 /*
-Run recieves events from the [Server] channels and calls the corresponding
-handlers.
+Run recieves events from the [Server] channels and routes them to the
+corresponding handlers.
 */
 func (s *Server) Run() {
 	for {
@@ -70,18 +78,16 @@ func (s *Server) handleRegister(h Handshake) {
 		return
 	}
 
-	cookie, err := h.Request.Cookie("Auth")
+	session, err := h.Request.Cookie("Auth")
 	if err != nil {
 		http.Error(h.ResponseWriter, "Sign up/in to start playing.", http.StatusUnauthorized)
 		return
 	}
 
-	sessionId := cookie.Value
-
 	req, err := http.NewRequest(
 		http.MethodPost,
 		os.Getenv("AUTH_URL"),
-		bytes.NewReader([]byte(sessionId)),
+		bytes.NewReader([]byte(session.Value)),
 	)
 	if err != nil {
 		http.Error(h.ResponseWriter, "Please try again later.", http.StatusInternalServerError)
@@ -107,7 +113,7 @@ func (s *Server) handleRegister(h Handshake) {
 		return
 	}
 
-	c := newClient(playerId, roomId, s.EventBus, s, conn)
+	c := newClient(playerId, roomId, s.unregister, s.EventBus, conn)
 
 	go c.read()
 	go c.write()
@@ -181,8 +187,8 @@ func (s *Server) handleUnregister(id string) {
 }
 
 /*
-handleEvent handles the incomming event.  It's a caller's responsibility to ensure
-that event has a valid payload and can be handled (the room exists).
+handleEvent handles the incomming event.  It's a caller's responsibility to
+ensure that event has a valid payload and can be handled (the room exists).
 */
 func (s *Server) handleEvent(e types.MetaEvent) {
 	switch e.Action {
@@ -191,27 +197,31 @@ func (s *Server) handleEvent(e types.MetaEvent) {
 	// Chat messages are not passed to the core server since there is no point
 	// in doing so.
 	case types.ActionChat:
+		// Hub room does not have a chat.
+		if e.RoomId == "hub" {
+			return
+		}
+
 		if r, exists := s.rooms[e.RoomId]; exists {
 			r.broadcast(types.Event{Action: types.ActionChat, Payload: e.Payload})
 		}
 
 	case types.ActionMakeMove:
 		if _, exists := s.rooms[e.RoomId]; exists {
-			raw, err := json.Marshal(e)
-			if err != nil {
-				log.Printf("cannot encode make move event: %s", err)
-				return
+			if raw, err := json.Marshal(e); err == nil {
+				mq.Publish(s.Channel, "gate", raw)
 			}
-			mq.Publish(s.Channel, "gate", raw)
 		}
 
 	case types.ActionEnterMatchmaking:
-		raw, err := json.Marshal(e)
-		if err != nil {
-			log.Printf("cannot encode enter matchmaking event: %s", err)
+		// Deny the request if the client is already in the game room.
+		if e.RoomId != "hub" {
 			return
 		}
-		mq.Publish(s.Channel, "gate", raw)
+
+		if raw, err := json.Marshal(e); err == nil {
+			mq.Publish(s.Channel, "gate", raw)
+		}
 
 	// Server events.
 
@@ -229,10 +239,7 @@ func (s *Server) handleEvent(e types.MetaEvent) {
 		log.Printf("room \"%s\" removed", e.RoomId)
 
 	case types.ActionGameInfo:
-		if r, exists := s.rooms[e.RoomId]; exists {
-			r.broadcast(types.Event{Action: e.Action, Payload: e.Payload})
-		}
-
+		fallthrough
 	case types.ActionCompletedMove:
 		if r, exists := s.rooms[e.RoomId]; exists {
 			r.broadcast(types.Event{Action: e.Action, Payload: e.Payload})
