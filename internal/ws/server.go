@@ -226,13 +226,27 @@ func (s *Server) handleEvent(e types.MetaEvent) {
 	// Server events.
 
 	case types.ActionAddRoom:
-		s.rooms[e.RoomId] = newRoom()
-		log.Printf("room \"%s\" added", e.RoomId)
+		var dto types.AddRoom
+		if err := json.Unmarshal(e.Payload, &dto); err == nil {
+			s.rooms[e.RoomId] = newRoom()
 
-		s.rooms["hub"].broadcast(types.Event{
-			Action:  types.ActionAddRoom,
-			Payload: e.Payload,
-		})
+			// Encode the redirect event.
+			if raw, err := json.Marshal(types.Event{
+				Action:  types.ActionRedirect,
+				Payload: []byte(strconv.Quote(e.RoomId)),
+			}); err == nil {
+				// Send redirect only to the room subscribers.
+				if c := s.clients[dto.WhiteId]; c != nil {
+					c.send <- raw
+				}
+
+				if c := s.clients[dto.BlackId]; c != nil {
+					c.send <- raw
+				}
+			}
+
+			log.Printf("room \"%s\" added", e.RoomId)
+		}
 
 	case types.ActionRemoveRoom:
 		delete(s.rooms, e.RoomId)
