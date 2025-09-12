@@ -29,6 +29,7 @@ handling WebSocket messages.
 type client struct {
 	// Timestamp when the last ping event was sent to measure response delay.
 	pingTimestamp time.Time
+	id            string
 	// Id of the room to which the client is subscribed.  Multiple subscribtions
 	// from a single client are prohibited.
 	roomId string
@@ -50,7 +51,7 @@ type client struct {
 newClient creates a new client and sets the WebSocket connection properties.
 */
 func newClient(
-	roomId string,
+	id, roomId string,
 	forward chan<- types.MetaEvent,
 	s *Server,
 	conn *websocket.Conn,
@@ -59,6 +60,7 @@ func newClient(
 
 	c := &client{
 		server:        s,
+		id:            id,
 		roomId:        roomId,
 		forward:       forward,
 		send:          make(chan []byte, 192),
@@ -79,8 +81,8 @@ func newClient(
 read consequentially (one at a time) reads messages from the connection and
 forwards them to the gatekeeper.
 */
-func (c *client) read(id string) {
-	defer c.cleanup(id)
+func (c *client) read() {
+	defer c.cleanup()
 
 	var e types.Event
 	for {
@@ -106,7 +108,7 @@ func (c *client) read(id string) {
 		}
 
 		c.forward <- types.MetaEvent{
-			ClientId: id,
+			ClientId: c.id,
 			RoomId:   c.roomId,
 			Action:   e.Action,
 			Payload:  e.Payload,
@@ -127,7 +129,7 @@ func (c *client) write() {
 		case raw, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				c.conn.WriteMessage(websocket.CloseMessage, nil)
 				return
 			}
 
@@ -182,8 +184,8 @@ func (c *client) handlePong() error {
 /*
 cleanup closes the connection and unregisters the client from the gatekeeper.
 */
-func (c *client) cleanup(id string) {
+func (c *client) cleanup() {
 	close(c.send)
 	c.conn.Close()
-	c.server.unregister <- id
+	c.server.unregister <- c.id
 }

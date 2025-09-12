@@ -70,6 +70,7 @@ func Consume(ch *amqp091.Channel, name string, handle chan<- types.MetaEvent) {
 		var e types.MetaEvent
 		for d := range events {
 			if err := json.Unmarshal(d.Body, &e); err != nil {
+				log.Print(string(d.Body))
 				log.Printf("cannot unmarshal queue event: %s", err)
 				d.Nack(false, false)
 				return

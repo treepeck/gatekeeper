@@ -107,14 +107,14 @@ func (s *Server) handleRegister(h Handshake) {
 		return
 	}
 
-	c := newClient(roomId, s.EventBus, s, conn)
+	c := newClient(playerId, roomId, s.EventBus, s, conn)
 
-	go c.read(playerId)
+	go c.read()
 	go c.write()
 
 	s.clients[playerId] = c
 
-	r.subscribe(playerId, c)
+	r.subscribe(c)
 
 	log.Printf("client \"%s\" registered to room \"%s\"", playerId, roomId)
 
@@ -126,10 +126,10 @@ func (s *Server) handleRegister(h Handshake) {
 	// Notify the core server that the client has connected to the game room.
 	if c.roomId != "hub" {
 		raw, err := json.Marshal(types.MetaEvent{
-			Action:   types.ActionLeaveRoom,
+			Action:   types.ActionJoinRoom,
 			ClientId: playerId,
 			RoomId:   c.roomId,
-			Payload:  []byte{},
+			Payload:  nil,
 		})
 		if err != nil {
 			log.Printf("cannot encode leave room event: %s", err)
@@ -165,22 +165,19 @@ func (s *Server) handleUnregister(id string) {
 		Payload: []byte(strconv.Itoa(len(s.clients))),
 	})
 
-	// Notify the core server that the client has disconnected from the game
-	// room.
-	if c.roomId != "hub" {
-		raw, err := json.Marshal(types.MetaEvent{
-			Action:   types.ActionLeaveRoom,
-			ClientId: id,
-			RoomId:   c.roomId,
-			Payload:  []byte{},
-		})
-		if err != nil {
-			log.Printf("cannot encode leave room event: %s", err)
-			return
-		}
-
-		mq.Publish(s.Channel, "gate", raw)
+	// Notify the core server that the client has disconnected.
+	raw, err := json.Marshal(types.MetaEvent{
+		Action:   types.ActionLeaveRoom,
+		ClientId: id,
+		RoomId:   c.roomId,
+		Payload:  nil,
+	})
+	if err != nil {
+		log.Printf("cannot encode leave room event: %s", err)
+		return
 	}
+
+	mq.Publish(s.Channel, "gate", raw)
 }
 
 /*
@@ -226,6 +223,10 @@ func (s *Server) handleEvent(e types.MetaEvent) {
 			Action:  types.ActionAddRoom,
 			Payload: e.Payload,
 		})
+
+	case types.ActionRemoveRoom:
+		delete(s.rooms, e.RoomId)
+		log.Printf("room \"%s\" removed", e.RoomId)
 
 	case types.ActionGameInfo:
 		if r, exists := s.rooms[e.RoomId]; exists {

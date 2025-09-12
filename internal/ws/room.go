@@ -17,8 +17,8 @@ func newRoom() *room {
 	}
 }
 
-func (r *room) subscribe(id string, c *client) {
-	r.subs[id] = c
+func (r *room) subscribe(c *client) {
+	r.subs[c.id] = c
 }
 
 func (r *room) unsubscribe(id string) {
