@@ -160,8 +160,6 @@ func (s *Server) handleUnregister(id string) {
 
 	if r, exists := s.rooms[c.roomId]; exists {
 		r.unsubscribe(id)
-	} else {
-		log.Printf("client subscribed to room \"%s\" which does not exist", c.roomId)
 	}
 
 	log.Printf("client \"%s\" unregistered from room \"%s\"", id, c.roomId)
@@ -249,14 +247,24 @@ func (s *Server) handleEvent(e types.MetaEvent) {
 		}
 
 	case types.ActionRemoveRoom:
-		delete(s.rooms, e.RoomId)
-		log.Printf("room \"%s\" removed", e.RoomId)
+		if r, exists := s.rooms[e.RoomId]; exists {
+			delete(s.rooms, e.RoomId)
+
+			// Disconnect clients after the room is removed.
+			for _, c := range r.subs {
+				c.conn.Close()
+			}
+
+			log.Printf("room \"%s\" removed", e.RoomId)
+		}
 
 	case types.ActionGameInfo:
 		fallthrough
 	case types.ActionCompletedMove:
 		if r, exists := s.rooms[e.RoomId]; exists {
 			r.broadcast(types.Event{Action: e.Action, Payload: e.Payload})
+		} else {
+			log.Print("room does not exist")
 		}
 
 	default:

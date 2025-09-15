@@ -95,7 +95,7 @@ func (c *client) read() {
 		}
 
 		switch e.Action {
-		case types.ActionPing:
+		case types.ActionPong:
 			c.handlePong()
 
 		// Forward client events with metadata.
