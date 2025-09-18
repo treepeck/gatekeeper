@@ -29,12 +29,12 @@ type Server struct {
 	unregister chan string
 	EventBus   chan types.MetaEvent
 	clients    map[string]*client
-	rooms      map[string]*room
+	rooms      map[string]room
 }
 
 func NewServer(ch *amqp091.Channel) *Server {
-	rooms := make(map[string]*room, 1)
-	rooms["hub"] = newRoom()
+	rooms := make(map[string]room, 1)
+	rooms["hub"] = newHubRoom()
 
 	return &Server{
 		Channel:    ch,
@@ -226,7 +226,7 @@ func (s *Server) handleEvent(e types.MetaEvent) {
 	case types.ActionAddRoom:
 		var dto types.AddRoom
 		if err := json.Unmarshal(e.Payload, &dto); err == nil {
-			s.rooms[e.RoomId] = newRoom()
+			s.rooms[e.RoomId] = newGameRoom(dto.WhiteId, dto.BlackId)
 
 			// Encode the redirect event.
 			if raw, err := json.Marshal(types.Event{
@@ -250,10 +250,7 @@ func (s *Server) handleEvent(e types.MetaEvent) {
 		if r, exists := s.rooms[e.RoomId]; exists {
 			delete(s.rooms, e.RoomId)
 
-			// Disconnect clients after the room is removed.
-			for _, c := range r.subs {
-				c.conn.Close()
-			}
+			r.destroy()
 
 			log.Printf("room \"%s\" removed", e.RoomId)
 		}

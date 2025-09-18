@@ -75,12 +75,11 @@ type CompletedMove struct {
 }
 
 /*
-GameInfo represents information the clients will recieve after connecting
-to the room.
+GameInfo represents information the clients will recieve after connecting to the
+room.
 */
 type GameInfo struct {
-	WhiteId     string `json:"wid"`
-	BlackId     string `json:"bid"`
-	TimeControl int    `json:"tc"`
-	TimeBonus   int    `json:"tb"`
+	CompletedMoves []CompletedMove `json:"cm"`
+	WhiteId        string          `json:"wid"`
+	BlackId        string          `json:"bid"`
 }
