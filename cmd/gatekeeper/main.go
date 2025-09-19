@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/treepeck/gatekeeper/internal/ws"
-	"github.com/treepeck/gatekeeper/pkg/env"
 	"github.com/treepeck/gatekeeper/pkg/mq"
 
 	"github.com/rabbitmq/amqp091-go"
@@ -15,12 +14,6 @@ import (
 func main() {
 	log.SetFlags(log.Lshortfile | log.Ldate | log.Ltime)
 
-	log.Print("Loading environment variables.")
-	if err := env.Load(".env"); err != nil {
-		log.Panic(err)
-	}
-	log.Print("Successfully loaded environment variables.")
-
 	log.Print("Connecting to RabbitMQ.")
 	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
 	if err != nil {
@@ -28,7 +21,7 @@ func main() {
 	}
 	defer conn.Close()
 
-	// Open an AMQP channel.
+	// Open the AMQP channel.
 	ch, err := conn.Channel()
 	if err != nil {
 		log.Panic(err)
@@ -68,7 +61,5 @@ func main() {
 		<-h.ResponseChannel
 	})
 
-	if err := http.ListenAndServe(os.Getenv("ADDR"), nil); err != nil {
-		log.Panic(err)
-	}
+	log.Panic(http.ListenAndServe(":3503", nil))
 }
