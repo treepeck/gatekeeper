@@ -32,13 +32,12 @@ cd gatekeeper
 ```
 
 Gatekeeper uses environment variables to specify the RabbitMQ connection URL and<br/>
-the port on which it will listen for WebSocket connections. Here is an example of how<br/>
-to create and populate a `.env` file in the gatekeeper folder:
+the URL to which it will send Authorization verification requests.  Here is an<br/>
+example of how to set the environment variables:
 
 ```
-touch .env
-echo "RABBITMQ_URL=amqp://guest:guest@localhost:5672/" >> .env
-echo "ADDR=:3503" >> .env
+export RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+export AUTH_URL=http://localhost:3502/auth/verify
 ```
 
 Run this command to start the server:
