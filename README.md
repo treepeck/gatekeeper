@@ -19,32 +19,8 @@ by the Gatekeeper.
 
 ## Local installation
 
-First install the Go compiler version 1.24.4 or newer (see https://go.dev/dl).
-
-You will also need a RabbitMQ server instance up and running <br/>
-(see https://www.rabbitmq.com/docs/download).
-
-Once everything is installed, clone this repository:
-
-```
-git clone https://github.com/treepeck/gatekeeper
-cd gatekeeper
-```
-
-Gatekeeper uses environment variables to specify the RabbitMQ connection URL and<br/>
-the URL to which it will send Authorization verification requests.  Here is an<br/>
-example of how to set the environment variables:
-
-```
-export RABBITMQ_URL=amqp://guest:guest@localhost:5672/
-export AUTH_URL=http://localhost:3502/auth/verify
-```
-
-Run this command to start the server:
-
-```
-go run cmd/gatekeeper/main.go
-```
+See [judo](https://github.com/treepeck/judo) to learn how to set up a local
+development environment.
 
 ## License
 
