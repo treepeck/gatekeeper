@@ -33,12 +33,6 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
-
-	// Declare the MQ topology.  See the doc/arch.png file.
-	err = mq.DeclareTopology(ch)
-	if err != nil {
-		log.Panic(err)
-	}
 	log.Printf("Successfully connected to RabbitMQ.")
 
 	log.Print("Starting server.")
