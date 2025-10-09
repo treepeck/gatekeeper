@@ -29,24 +29,35 @@ const (
 )
 
 /*
-Event represents an arbitrary event without metadata, exchanged between the
-Gatekeeper and connected clients.
+ExternalEvent represents an event without metadata, exchanged between the
+clients and frontend.
 */
-type Event struct {
-	Action  EventAction     `json:"a"`
+type ExternalEvent struct {
 	Payload json.RawMessage `json:"p"`
+	Action  EventAction     `json:"a"`
 }
 
 /*
-MetaEvent represents an event with additional metadata used to route, validate,
-and handle it.  Clients never interact with MetaEvents directly; they are only
-exchanged between the Gatekeeper and the core server.
+ClientEvent represents an event with enough metadata to route and handle it.
+Those events are exchanged only between the core server and Gatekeeper via the
+AMQP "gate" queue.
 */
-type MetaEvent struct {
-	RoomId   string          `json:"rid"`
-	ClientId string          `json:"cid"`
+type ClientEvent struct {
 	Payload  json.RawMessage `json:"p"`
+	ClientId string          `json:"cid"`
+	RoomId   string          `json:"rid"`
 	Action   EventAction     `json:"a"`
+}
+
+/*
+ServerEvent represents an event with additional metadata used to route it.
+Those events are exchanged only between the core server and Gatekeeper via the
+AMQP "core" queue.
+*/
+type ServerEvent struct {
+	Payload json.RawMessage `json:"p"`
+	RoomId  string          `json:"rid"`
+	Action  EventAction     `json:"a"`
 }
 
 /*

@@ -38,22 +38,20 @@ func main() {
 	log.Print("Starting server.")
 	s := ws.NewServer(ch)
 
-	// Run the goroutines which will run untill the program exits.
+	// Call the goroutines which will run untill the program exits.
 	go s.Run()
-	go mq.Consume(s.Channel, "core", s.EventBus)
+	go mq.Consume(ch, "core", s.Response)
 
 	// Handle incomming requests.
-	http.HandleFunc("GET /ws", func(rw http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("GET /ws", ws.Authorize(func(rw http.ResponseWriter, r *http.Request) {
 		h := ws.Handshake{
 			Request:         r,
 			ResponseWriter:  rw,
 			ResponseChannel: make(chan struct{}),
 		}
-
 		s.Register <- h
-		// Wait for the response from the handler.
 		<-h.ResponseChannel
-	})
+	}))
 
 	log.Panic(http.ListenAndServe(":3503", nil))
 }

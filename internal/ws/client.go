@@ -23,22 +23,26 @@ const (
 )
 
 /*
-client wraps a single connection and provides methods for reading, writing and
-handling WebSocket messages.
+client manages the connection lifecycle and provides methods for reading,
+writing and handling WebSocket messages.
+
+The reason for the send channel is that events must be read and written
+sequentially, since the Gorilla WebSocket library allows only one concurrent
+writer to a connection at a time.
 */
 type client struct {
-	// Timestamp when the last ping event was sent to measure the response delay.
+	// Timestamp when the last ping event was sent to measure the network delay.
 	pingTimestamp time.Time
 	id            string
-	// Id of the room to which the client is subscribed.  Multiple subscribtions
-	// from a single client are prohibited.
+	// Id of the room to which the client is subscribed to be able to route
+	// client's events to that room.  The client can be subscribed only to a
+	// single room at a time.
 	roomId string
-	// unregister is a channel which will notify the server about client
+	// unregister is a channel which will notify the server about the client
 	// disconnection.
-	unregister chan<- string
-	// forward is a channel which will recieve and handle the incomming client
-	// events.
-	forward chan<- types.MetaEvent
+	unregister chan<- *client
+	// forward is a channel to which the client will send the readed events.
+	forward chan<- types.ClientEvent
 	// send is a channel which recieves events that the client will write to
 	// the WebSocket connection.  It must recieve raw bytes to avoid expensive
 	// JSON encoding for each client in case of event broadcasting.
@@ -56,8 +60,8 @@ newClient creates a new client and sets the WebSocket connection properties.
 */
 func newClient(
 	id, roomId string,
-	unregister chan<- string,
-	forward chan<- types.MetaEvent,
+	unregister chan<- *client,
+	forward chan<- types.ClientEvent,
 	conn *websocket.Conn,
 ) *client {
 	now := time.Now()
@@ -82,13 +86,16 @@ func newClient(
 }
 
 /*
-read consequentially (one at a time) reads events from the connection and
-forwards them to the gatekeeper.
+read reads and handles events from the connection sequentially (one at a time).
+
+Pong events are handled by the client itself.  In the case of other event types,
+they are forwarded to the forward channel.  If an event cannot be read, the
+connection will be interrupted.
 */
 func (c *client) read() {
 	defer c.cleanup()
 
-	var e types.Event
+	var e types.ExternalEvent
 	for {
 		if err := c.conn.ReadJSON(&e); err != nil {
 			return
@@ -99,16 +106,13 @@ func (c *client) read() {
 			c.handlePong()
 
 		// Forward client events with metadata.
-		case types.ActionMakeMove:
-			fallthrough
-		case types.ActionChat:
-			fallthrough
-		case types.ActionEnterMatchmaking:
-			c.forward <- types.MetaEvent{
+		case types.ActionEnterMatchmaking, types.ActionMakeMove,
+			types.ActionChat:
+			c.forward <- types.ClientEvent{
+				Payload:  e.Payload,
 				ClientId: c.id,
 				RoomId:   c.roomId,
 				Action:   e.Action,
-				Payload:  e.Payload,
 			}
 
 		// Close the connection if the client sends the malformed event.
@@ -119,7 +123,9 @@ func (c *client) read() {
 }
 
 /*
-write consequentially (one at a time) writes events to the connection.
+write takes the incomming events from the send channel and writes them to the
+connection sequentially (one at a time).
+
 Automatically sends ping events to maintain a hearbeat.
 */
 func (c *client) write() {
@@ -152,7 +158,7 @@ func (c *client) write() {
 
 			c.pingTimestamp = now
 
-			if err := c.conn.WriteJSON(types.Event{
+			if err := c.conn.WriteJSON(types.ExternalEvent{
 				Action:  types.ActionPing,
 				Payload: json.RawMessage(strconv.Itoa(c.delay)),
 			}); err != nil {
@@ -189,5 +195,5 @@ cleanup closes the connection and unregisters the client from the gatekeeper.
 func (c *client) cleanup() {
 	close(c.send)
 	c.conn.Close()
-	c.unregister <- c.id
+	c.unregister <- c
 }

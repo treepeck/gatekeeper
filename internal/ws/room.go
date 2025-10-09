@@ -20,9 +20,10 @@ There are two types of rooms:
 type room interface {
 	subscribe(c *client)
 	unsubscribe(id string)
-	broadcast(e types.Event)
+	broadcast(e types.ExternalEvent)
 	// destroy closes the connection of each subscribed client.
 	destroy()
+	getSubscriber(clientId string) *client
 }
 
 type hubRoom struct {
@@ -44,7 +45,7 @@ func (r *hubRoom) unsubscribe(id string) {
 /*
 broadcast encodes the specified event and sends it to all subscribed clients.
 */
-func (r *hubRoom) broadcast(e types.Event) {
+func (r *hubRoom) broadcast(e types.ExternalEvent) {
 	raw, err := json.Marshal(e)
 	if err != nil {
 		log.Printf("cannot encode external event: %s", err)
@@ -60,6 +61,10 @@ func (r *hubRoom) destroy() {
 	for _, c := range r.subs {
 		c.conn.Close()
 	}
+}
+
+func (r *hubRoom) getSubscriber(clientId string) *client {
+	return r.subs[clientId]
 }
 
 type gameRoom struct {
@@ -93,7 +98,7 @@ func (r *gameRoom) subscribe(c *client) {
 		log.Printf("cannot encode game info: %s", err)
 	}
 
-	raw, err := json.Marshal(types.Event{
+	raw, err := json.Marshal(types.ExternalEvent{
 		Action:  types.ActionGameInfo,
 		Payload: p,
 	})
@@ -109,7 +114,7 @@ func (r *gameRoom) unsubscribe(id string) {
 	delete(r.subs, id)
 }
 
-func (r *gameRoom) broadcast(e types.Event) {
+func (r *gameRoom) broadcast(e types.ExternalEvent) {
 	// Cache game info after each move.
 	if e.Action == types.ActionCompletedMove {
 		var p types.CompletedMove
@@ -135,4 +140,8 @@ func (r *gameRoom) destroy() {
 	for _, c := range r.subs {
 		c.conn.Close()
 	}
+}
+
+func (r *gameRoom) getSubscriber(clientId string) *client {
+	return r.subs[clientId]
 }
